@@ -2,7 +2,7 @@ from typing import List, Iterable, Union
 from pandas import DataFrame
 from saf import Sentence
 from langvae import LangVAE
-from langspace.metrics import DisentanglementMetrics
+from langspace.metrics.disentanglement import DisentanglementMetric
 from .. import LatentSpaceProbe
 
 
@@ -11,7 +11,7 @@ class DisentanglementProbe(LatentSpaceProbe):
     Class for probing the disentanglement of the latent space of a language VAE.
     """
     def __init__(self, model: LangVAE, data: Iterable[Union[str, Sentence]], sample_size: int,
-                 metrics: List[DisentanglementMetrics], gen_factors: dict):
+                 metrics: List[DisentanglementMetric], gen_factors: dict):
         """
         Initialize the DisentanglementProbe.
 
@@ -19,7 +19,7 @@ class DisentanglementProbe(LatentSpaceProbe):
             model (LangVAE): The language model to probe.
             data (Iterable[Union[str, Sentence]]): The data to use for probing.
             sample_size (int): The number of data points to use for probing.
-            metrics (List[DisentanglementMetrics]): A list of disentanglement metrics to compute.
+            metrics (List[DisentanglementMetric]): A list of disentanglement metrics to compute.
             gen_factors (dict): The generative factors to probe with.
         """
         super(DisentanglementProbe, self).__init__(model, data, sample_size)
