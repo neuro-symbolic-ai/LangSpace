@@ -14,14 +14,15 @@ from langspace.ops.arithmetic import ArithmeticOps
 model = LangVAE.load_from_hf_hub(models.OPTIMUS_DEF) # Loads Optimus definition model (LangVAE) from HF.
 wiktdefs = WiktionaryDefinitionCorpus.from_resource("pos+lemma+ctag+dep+dsr") # Loads annotated dataset
 # Returns a pandas.DataFrame: cols = metrics, single row
-disentang_report = DisentanglementProbe(model, wiktdefs, sample_size=1000, metrics=[Metric.Z_DIFF, Metric.MIG, ...],
-                                 gen_factors={"Quality": ["DIFFERENTIA-QUALITY", "QUALITY-MODIFIER", "ACCESSORY-QUALITY"], ...})
+disentang_report = DisentanglementProbe(
+    model, wiktdefs, sample_size=1000, metrics=[Metric.Z_DIFF, Metric.MIG, ...],
+    gen_factors={"Quality": ["DIFFERENTIA-QUALITY", "QUALITY-MODIFIER", "ACCESSORY-QUALITY"], ...}).report()
 print(disentang_report)
-cluster_viz_report = ClusterVisualizationProbe(model, wiktdefs, sample_size=1000, method=[CvM.UMAP])
+cluster_viz_report = ClusterVisualizationProbe(model, wiktdefs, sample_size=1000, method=[CvM.UMAP]).report()
 # Returns a pandas.DataFrame: cols = dims, rows = distance, vals = generated sentences
-trav_report = TraversalProbe(model, wiktdefs, sample_size=10, dims=list(range(32)))
+trav_report = TraversalProbe(model, wiktdefs, sample_size=10, dims=list(range(32))).report()
 # Returns a pandas.DataFrame: cols = seeds, rows = distance from start, vals = generated sentences
 interp_dataset = ...
-interp_report = InterpolationProbe(model, interp_dataset, eval=[InterpMetric.QUALITY, InterpMetric.SMOOTHNESS])
+interp_report = InterpolationProbe(model, interp_dataset, eval=[InterpMetric.QUALITY, InterpMetric.SMOOTHNESS]).report()
 op_dataset = ...
-ArithmeticProbe(model, op_dataset, ops=list(ArithmeticOps))
+ArithmeticProbe(model, op_dataset, ops=list(ArithmeticOps)).report()

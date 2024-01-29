@@ -23,6 +23,8 @@ class DisentanglementProbe(LatentSpaceProbe):
             gen_factors (dict): The generative factors to probe with.
         """
         super(DisentanglementProbe, self).__init__(model, data, sample_size)
+        self.metrics = metrics
+        self.gen_factors = gen_factors
 
     def report(self) -> DataFrame:
         """
