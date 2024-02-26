@@ -9,7 +9,7 @@ class LatentSpaceProbe(ABC):
     """
     Abstract base class for probing the latent space of a language VAE.
     """
-    def __init__(self, model: LangVAE, data: Iterable[Union[str, Sentence]], sample_size: int, **kwargs):
+    def __init__(self, model: LangVAE, data: Iterable, sample_size: int, **kwargs):
         """
         Initialize the LatentSpaceProbe.
 

@@ -1,31 +1,35 @@
-from typing import List, Iterable, Union
-from pandas import DataFrame
-from saf import Sentence
-from langvae import LangVAE
-from langspace.metrics.interpolation import InterpolationMetrics
-from .. import LatentSpaceProbe
 import torch
 import torch.nn.functional as F
+import pandas as pd
+import gensim.downloader as api
+from typing import Tuple, List
+from pandas import DataFrame
 from nltk.corpus import stopwords
 from nltk import download
-import gensim.downloader as api
-import pandas as pd
+from saf import Sentence
+from langvae import LangVAE
+from langspace.metrics.interpolation import InterpolationMetric
+from .. import LatentSpaceProbe
+from langspace.ops.interpolation import InterpolationOps
+
+
 
 
 class InterpolationProbe(LatentSpaceProbe):
     """
     Class for probing the interpolation of the latent space of a language VAE.
     """
-    def __init__(self, model: LangVAE, data: Iterable[Union[str, Sentence]], eval: List[InterpolationMetrics]):
+    def __init__(self, model: LangVAE, data: List[Tuple[str, str]], eval: List[InterpolationMetric]):
         """
         Initialize the InterpolationProbe.
 
         Args:
             model (LangVAE): The language model to probe.
-            data (Iterable[Union[str, Sentence]]): The data to use for probing.
+            data (List[Tuple[str, str]]): Sentence pairs to use for probing.
             eval (List[InterpolationMetrics]): The metrics to evaluate.
         """
         super(InterpolationProbe, self).__init__(model, data, 0)
+        self.data = data
         self.eval = eval
 
     def encoding(self, data):
@@ -33,12 +37,18 @@ class InterpolationProbe(LatentSpaceProbe):
         args: one sentence (string)
         return: latent (tensor)
         """
-        seed = [data, data]
-        encode_seed = self.model.decoder.tokenizer(seed, return_tensors='pt')
+        seed = list(data)
+        if (isinstance(seed[0], Sentence)):
+            seed = [sent.surface for sent in data]
+        if (len(seed) < 2):
+            seed.append("")
+
+        encode_seed = self.model.decoder.tokenizer(seed, padding="max_length", truncation=True,
+                                                   max_length=self.model.decoder.max_len, return_tensors='pt')
         encode_seed_oh = F.one_hot(encode_seed["input_ids"], num_classes=len(self.model.decoder.tokenizer.get_vocab())).to(torch.int8)
         encoded = self.model.encoder(encode_seed_oh)
-        mu = encoded["embedding"][0]
-        std = encoded["log_covariance"][0]
+        mu = encoded["embedding"]
+        std = encoded["log_covariance"]
         latent, eps = self.model._sample_gauss(mu, std)
         return latent
 
@@ -48,35 +58,11 @@ class InterpolationProbe(LatentSpaceProbe):
         return: sentence list
         """
         generated = self.model.decoder(prior)['reconstruction']
-        sentence_list = [s.replace(self.model.decoder.tokenizer.pad_token, "|#|")
-                         for s in self.model.decoder.tokenizer.batch_decode(torch.argmax(generated, dim=-1))]
+        sentence_list = self.model.decoder.tokenizer.batch_decode(torch.argmax(generated, dim=-1),
+                                                                  skip_special_tokens=True)
         return sentence_list
 
-    def linearize_interpolate(self, source, target, size=10):
-        return [source * (1-i/size) + target * i/size for i in range(size+1)]
 
-    def preprocess(self, sentence, stop_words):
-        return [w for w in sentence.lower().split() if w not in stop_words]
-
-    def word_mover_distance(self, sent1, sent2, model, stopword):
-        sent1 = self.preprocess(sent1, stopword)
-        sent2 = self.preprocess(sent2, stopword)
-        distance = model.wmdistance(sent1, sent2)
-        return distance
-
-    def interpolation_smoothness(self, interpolate_path, model_wmd, stop_words):
-        """
-        args: list of sentences
-        return: value
-        """
-        source, target = interpolate_path[0], interpolate_path[-1]
-        d_origin = self.word_mover_distance(source, target, model_wmd, stop_words)
-        list_d = []
-        for j in range(len(interpolate_path)-1):
-            d = self.word_mover_distance(interpolate_path[j], interpolate_path[j+1], model_wmd, stop_words)
-            list_d.append(d)
-
-        return d_origin / sum(list_d)
 
 
     def report(self) -> DataFrame:
@@ -96,26 +82,19 @@ class InterpolationProbe(LatentSpaceProbe):
         # model_wmd = gensim.models.KeyedVectors.load('../checkpoints/word2vec-google-news-300.model')
         download('stopwords')
         stop_words = stopwords.words('english')
-        report = None
-        for sent_pair in self.data:
-            source = self.encoding(sent_pair[0])
-            target = self.encoding(sent_pair[1])
-            latent_path = self.linearize_interpolate(source, target)
-            sent_list = self.decoding(torch.stack(latent_path))
-            IS = self.interpolation_smoothness(sent_list, model_wmd, stop_words)
-
-            source_list = [sent_pair[0] for _ in range(len(sent_list))]
-            target_list = [sent_pair[1] for _ in range(len(sent_list))]
-            IS_list = [IS for _ in range(len(sent_list))]
+        report = list()
+        source = self.encoding([sp[0] for sp in self.data])
+        target = self.encoding([sp[1] for sp in self.data])
+        latent_path = torch.stack(InterpolationOps.linearize_interpolate(source, target))
+        for i in range(len(self.data)):
+            sent_list = self.decoding(latent_path[:, i, :])
+            ismooth = InterpolationOps.interpolation_smoothness(sent_list, model_wmd, stop_words)
 
             # save to dataframe.
-            d = {'source': source_list, 'target': target_list, 'distance': IS_list, 'generate': sent_list}
-            res = pd.DataFrame(d)
+            d = {'source': self.data[i][0], 'target': self.data[i][1], 'distance': ismooth, 'generate': "\n".join(sent_list)}
+            report.append(d)
 
-            if report is None:
-                report = res
-            else:
-                report.append(res)
+        return pd.DataFrame(report)
 
 
 

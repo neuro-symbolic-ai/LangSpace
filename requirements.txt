@@ -1,6 +1,9 @@
 torch
+numpy
 transformers
 pandas
+scipy
+pot
 langvae @ git+https://github.com/neuro-symbolic-ai/LangVAE.git
 saf @ git+https://github.com/dscarvalho/saf.git
 saf_datasets @ git+https://github.com/neuro-symbolic-ai/saf_datasets.git
