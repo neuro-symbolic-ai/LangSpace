@@ -11,12 +11,14 @@ from langspace.metrics.interpolation import InterpolationMetric as InterpMetric
 from langspace.probe.cluster_vis import ClusterVisualizationMethod as CvM
 from langspace.ops.arithmetic import ArithmeticOps
 
+DEVICE = "cpu"
+
 
 # Loading and evaluating pretrained model
-model = LangVAE.load_from_hf_hub(models.OPTIMUS_DEF, allow_pickle=True) # Loads Optimus definition model (LangVAE) from HF.
+model = LangVAE.load_from_hf_hub(models.OPTIMUS_ENTAILMENTBANK, allow_pickle=True) # Loads Optimus definition model (LangVAE) from HF.
 model.eval()
-model.to("mps")
-wiktdefs = WiktionaryDefinitionCorpus.from_resource("pos+lemma+ctag+dep+dsr#sample") # Loads annotated dataset
+model.to(DEVICE)
+# wiktdefs = WiktionaryDefinitionCorpus.from_resource("pos+lemma+ctag+dep+dsr#sample") # Loads annotated dataset
 # Returns a pandas.DataFrame: cols = metrics, single row
 # disentang_report = DisentanglementProbe(
 #     model, wiktdefs, sample_size=1000, metrics=[Metric.Z_DIFF, Metric.MIG, ...],
