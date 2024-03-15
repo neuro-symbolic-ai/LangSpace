@@ -13,8 +13,6 @@ from .. import LatentSpaceProbe
 from langspace.ops.interpolation import InterpolationOps
 
 
-
-
 class InterpolationProbe(LatentSpaceProbe):
     """
     Class for probing the interpolation of the latent space of a language VAE.
@@ -32,14 +30,17 @@ class InterpolationProbe(LatentSpaceProbe):
         self.data = data
         self.eval = eval
 
-    def encoding(self, data):
+    def encoding(self, data: List[str]):
         """
-        args: one sentence (string)
-        return: latent (tensor)
+        Encodes the sentences
+
+        Args:
+            data (List[str]): sentences
+
+        Returns:
+            Tensor: Latent representation
         """
         seed = list(data)
-        if (isinstance(seed[0], Sentence)):
-            seed = [sent.surface for sent in data]
         if (len(seed) < 2):
             seed.append("")
 
@@ -52,16 +53,19 @@ class InterpolationProbe(LatentSpaceProbe):
 
     def decoding(self, prior):
         """
-        args: tensor sent_num by latent_dim
-        return: sentence list
+        Decodes latent representations
+
+        Args:
+            prior (Tensor): latent representations
+
+        Returns:
+            List[str]: Decoded sentences
         """
+
         generated = self.model.decoder(prior)['reconstruction']
         sentence_list = self.model.decoder.tokenizer.batch_decode(torch.argmax(generated, dim=-1),
                                                                   skip_special_tokens=True)
         return sentence_list
-
-
-
 
     def report(self) -> DataFrame:
         """

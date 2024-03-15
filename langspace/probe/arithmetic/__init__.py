@@ -28,11 +28,20 @@ class ArithmeticProbe(LatentSpaceProbe):
 
     def encoding(self, data):
         """
-        args: one sentence (string)
-        return: latent (tensor)
+        Encodes the sentences
+
+        Args:
+            data (List[str]): sentences
+
+        Returns:
+            Tensor: Latent representation
         """
-        seed = [data, data]
-        encode_seed = self.model.decoder.tokenizer(seed, return_tensors='pt')
+        seed = list(data)
+        if (len(seed) < 2):
+            seed.append("")
+
+        encode_seed = self.model.decoder.tokenizer(seed, padding="max_length", truncation=True,
+                                                   max_length=self.model.decoder.max_len, return_tensors='pt')
         encode_seed_oh = F.one_hot(encode_seed["input_ids"], num_classes=len(self.model.decoder.tokenizer.get_vocab())).to(torch.int8)
         latent = self.model.encode_z(encode_seed_oh)
 
@@ -40,8 +49,13 @@ class ArithmeticProbe(LatentSpaceProbe):
 
     def decoding(self, prior):
         """
-        args: tensor sent_num by latent_dim
-        return: sentence list
+        Decodes latent representations
+
+        Args:
+            prior (Tensor): latent representations
+
+        Returns:
+            List[str]: Decoded sentences
         """
         generated = self.model.decoder(prior)['reconstruction']
         sentence_list = self.model.decoder.tokenizer.batch_decode(torch.argmax(generated, dim=-1),

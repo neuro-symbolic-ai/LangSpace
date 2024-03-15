@@ -16,7 +16,7 @@ def load_requirements() -> list:
 
 setup(
     name='LangSpace',
-    version='0.0.5',
+    version='0.0.6',
     packages=['langspace', 'langspace.ops', 'langspace.probe', 'langspace.probe.sts', 'langspace.probe.defmod',
               'langspace.probe.lingprop', 'langspace.probe.traversal', 'langspace.probe.arithmetic',
               'langspace.probe.cluster_vis', 'langspace.probe.interpolation', 'langspace.probe.disentanglement',
