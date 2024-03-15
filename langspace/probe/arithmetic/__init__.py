@@ -1,19 +1,19 @@
-from typing import List, Iterable, Union
-from pandas import DataFrame
-from saf import Sentence
-from langvae import LangVAE
-from langspace.ops.arithmetic import ArithmeticOps
-from .. import LatentSpaceProbe
 import torch.nn.functional as F
 import torch
 import pandas as pd
+from typing import List, Tuple
+from torch import Tensor
+from pandas import DataFrame
+from langvae import LangVAE
+from langspace.ops.arithmetic import ArithmeticOps
+from .. import LatentSpaceProbe
 
 
 class ArithmeticProbe(LatentSpaceProbe):
     """
     Class for probing the arithmetic operations in the latent space of a language VAE.
     """
-    def __init__(self, model: LangVAE, data: Iterable[Union[str, Sentence]], ops: List[ArithmeticOps]):
+    def __init__(self, model: LangVAE, data: List[Tuple[str, str]], ops: List[ArithmeticOps]):
         """
         Initialize the ArithmeticProbe.
 
@@ -23,6 +23,7 @@ class ArithmeticProbe(LatentSpaceProbe):
             ops (List[ArithmeticOps]): The arithmetic operations to evaluate.
         """
         super(ArithmeticProbe, self).__init__(model, data, 0)
+        self.data = data
         self.ops = ops
 
     def encoding(self, data):
@@ -33,10 +34,8 @@ class ArithmeticProbe(LatentSpaceProbe):
         seed = [data, data]
         encode_seed = self.model.decoder.tokenizer(seed, return_tensors='pt')
         encode_seed_oh = F.one_hot(encode_seed["input_ids"], num_classes=len(self.model.decoder.tokenizer.get_vocab())).to(torch.int8)
-        encoded = self.model.encoder(encode_seed_oh)
-        mu = encoded["embedding"][0]
-        std = encoded["log_covariance"][0]
-        latent, eps = self.model._sample_gauss(mu, std)
+        latent = self.model.encode_z(encode_seed_oh)
+
         return latent
 
     def decoding(self, prior):
@@ -45,19 +44,20 @@ class ArithmeticProbe(LatentSpaceProbe):
         return: sentence list
         """
         generated = self.model.decoder(prior)['reconstruction']
-        sentence_list = [s.replace(self.model.decoder.tokenizer.pad_token, "|#|")
-                         for s in self.model.decoder.tokenizer.batch_decode(torch.argmax(generated, dim=-1))]
+        sentence_list = self.model.decoder.tokenizer.batch_decode(torch.argmax(generated, dim=-1),
+                                                                  skip_special_tokens=True)
         return sentence_list
 
-    def arithmetic(self, source, target):
-        res = []
-        for ops in self.ops:
-            if ops == 'add':
+    def arithmetic(self, source, target) -> List[Tensor]:
+        res = list()
+        for op in self.ops:
+            if op == ArithmeticOps.SUM:
                 res.append(source + target)
-            elif ops == 'sub':
+            elif op == ArithmeticOps.SUB:
                 res.append(source - target)
             else:
-                res.append((source + target)/2)
+                res.append((source + target) / 2)
+
         return res
 
     def report(self) -> DataFrame:
@@ -73,19 +73,22 @@ class ArithmeticProbe(LatentSpaceProbe):
             DataFrame: The generated report.
             column = source, target, ops, generated.
         """
-        report = None
-        for sent_pair in self.data:
-            source = self.encoding(sent_pair[0])
-            target = self.encoding(sent_pair[1])
-            latent_ops_list = self.arithmetic(source, target)
-            sent_list = self.decoding(torch.stack(latent_ops_list))
-            # save to dataframe.
-            source_list = [sent_pair[0] for _ in range(len(sent_list))]
-            target_list = [sent_pair[1] for _ in range(len(sent_list))]
-            d = {'source': source_list, 'target': target_list, 'ops': self.ops, 'generate': latent_ops_list}
-            res = pd.DataFrame(d)
+        report = list()
+        source_list = [sp[0] for sp in self.data]
+        target_list = [sp[1] for sp in self.data]
+        source = self.encoding(source_list)
+        target = self.encoding(target_list)
+        latent_ops_list = self.arithmetic(source, target)
+        sent_list = self.decoding(torch.cat(latent_ops_list))
+        data_len = len(self.data)
 
-            if report is None:
-                report = res
-            else:
-                report.append(res)
+        for i, op in enumerate(self.ops):
+            d = {
+                "source": source_list,
+                "target": target_list,
+                "op": [op.value.lower()] * data_len,
+                "generate": sent_list[i * data_len: (i + 1) * data_len]
+            }
+            report.append(pd.DataFrame(d))
+
+        return pd.concat(report).reset_index(drop=True)

@@ -53,7 +53,7 @@ class TraversalProbe(LatentSpaceProbe):
                                    num_classes=len(self.model.decoder.tokenizer.get_vocab())).to(torch.int8)
         encoded = self.model.encoder(encode_seed_oh)
         mu = encoded["embedding"]
-        std = encoded["log_covariance"]
+        std = torch.exp(0.5 * encoded["log_covariance"])
         latent, eps = self.model._sample_gauss(mu, std)
         return mu, std, latent
 
@@ -106,7 +106,7 @@ class TraversalProbe(LatentSpaceProbe):
                 # save to dataframe.
                 report.append(d)
 
-            report.sort(key=lambda x: (x["seeds"], x["dim"]))
+            report.sort(key=lambda x: (x["seeds"], x["dim"], x["distance"]))
 
         return pd.DataFrame(report)
 

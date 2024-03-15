@@ -46,10 +46,8 @@ class InterpolationProbe(LatentSpaceProbe):
         encode_seed = self.model.decoder.tokenizer(seed, padding="max_length", truncation=True,
                                                    max_length=self.model.decoder.max_len, return_tensors='pt')
         encode_seed_oh = F.one_hot(encode_seed["input_ids"], num_classes=len(self.model.decoder.tokenizer.get_vocab())).to(torch.int8)
-        encoded = self.model.encoder(encode_seed_oh)
-        mu = encoded["embedding"]
-        std = encoded["log_covariance"]
-        latent, eps = self.model._sample_gauss(mu, std)
+        latent = self.model.encode_z(encode_seed_oh)
+
         return latent
 
     def decoding(self, prior):
