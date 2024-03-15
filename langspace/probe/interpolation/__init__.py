@@ -47,7 +47,8 @@ class InterpolationProbe(LatentSpaceProbe):
         encode_seed = self.model.decoder.tokenizer(seed, padding="max_length", truncation=True,
                                                    max_length=self.model.decoder.max_len, return_tensors='pt')
         encode_seed_oh = F.one_hot(encode_seed["input_ids"], num_classes=len(self.model.decoder.tokenizer.get_vocab())).to(torch.int8)
-        latent = self.model.encode_z(encode_seed_oh)
+        with torch.no_grad():
+            latent = self.model.encode_z(encode_seed_oh)
 
         return latent
 

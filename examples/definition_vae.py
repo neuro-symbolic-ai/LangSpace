@@ -8,7 +8,7 @@ from langvae import LangVAE
 from langspace.probe import DisentanglementProbe, TraversalProbe, InterpolationProbe, ClusterVisualizationProbe, ArithmeticProbe
 from langspace.metrics.disentanglement import DisentanglementMetric as Metric
 from langspace.metrics.interpolation import InterpolationMetric as InterpMetric
-from langspace.probe.cluster_vis import ClusterVisualizationMethod as CvM
+from langspace.probe.cluster_vis.methods import ClusterVisualizationMethod as CvM
 from langspace.ops.arithmetic import ArithmeticOps
 
 DEVICE = "cpu"
@@ -19,7 +19,7 @@ model = LangVAE.load_from_hf_hub(models.OPTIMUS_ENTAILMENTBANK, allow_pickle=Tru
 model.eval()
 model.to(DEVICE)
 # wiktdefs = WiktionaryDefinitionCorpus.from_resource("pos+lemma+ctag+dep+dsr#sample") # Loads annotated dataset
-eb_dataset = [sent.surface for sent in EntailmentBankDataSet()
+eb_dataset = [sent for sent in EntailmentBankDataSet()
               if (sent.annotations["type"] == "answer" or sent.annotations["type"].startswith("context"))]
 # Returns a pandas.DataFrame: cols = metrics, single row
 # disentang_report = DisentanglementProbe(
@@ -27,12 +27,7 @@ eb_dataset = [sent.surface for sent in EntailmentBankDataSet()
 #     gen_factors={"Quality": ["DIFFERENTIA-QUALITY", "QUALITY-MODIFIER", "ACCESSORY-QUALITY"], ...}).report()
 # print(disentang_report)
 
-# cluster_viz_report = ClusterVisualizationProbe(model, [(sent.surface, sent.annotations["DSR"]) for sent in wiktdefs],
-#                                                sample_size=1000, method=[CvM.UMAP]).report()
-# print(cluster_viz_report)
-
 # Returns a pandas.DataFrame: cols = dims, rows = distance, vals = generated sentences
-
 trav_report = TraversalProbe(model, eb_dataset[:2], sample_size=10, dims=list(range(32))).report()
 print(trav_report)
 trav_report.to_csv("traversal.csv")
@@ -54,5 +49,6 @@ arith_report = ArithmeticProbe(model, op_dataset, ops=list(ArithmeticOps)).repor
 print(arith_report)
 arith_report.to_csv("arithm.csv")
 
-
+cluster_viz_report = ClusterVisualizationProbe(model, [(sent.surface, sent.annotations["type"]) for sent in eb_dataset],
+                                               sample_size=1000, methods=[CvM.UMAP, CvM.TSNE, CvM.PCA]).report()
 

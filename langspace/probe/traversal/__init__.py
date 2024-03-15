@@ -51,7 +51,9 @@ class TraversalProbe(LatentSpaceProbe):
                                                    max_length=self.model.decoder.max_len, return_tensors='pt')
         encode_seed_oh = F.one_hot(encode_seed["input_ids"],
                                    num_classes=len(self.model.decoder.tokenizer.get_vocab())).to(torch.int8)
-        encoded = self.model.encoder(encode_seed_oh)
+        with torch.no_grad():
+            encoded = self.model.encoder(encode_seed_oh)
+
         mu = encoded["embedding"]
         std = torch.exp(0.5 * encoded["log_covariance"])
         latent, eps = self.model._sample_gauss(mu, std)
