@@ -1,0 +1,23 @@
+[project]
+name = "langspace"
+version = "0.1.1"
+authors = [
+  { name="Danilo S. Carvalho", email="danilo.carvalho@manchester.ac.uk" },
+  { name="Yingji Zhang", email="yingji.zhang@postgrad.manchester.ac.uk" }
+]
+description = "LangSpace: Probing Large Language VAEs made simple"
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Operating System :: OS Independent",
+]
+keywords = ["probing", "vae", "llm", "generative", "nlp"]
+dynamic = ["dependencies"]
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[project.urls]
+Homepage = "https://github.com/neuro-symbolic-ai/LangSpace"
+Issues = "https://github.com/neuro-symbolic-ai/LangSpace/issues"
