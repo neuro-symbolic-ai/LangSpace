@@ -48,8 +48,6 @@ for sent in eb_dataset:
     for token in sent.tokens:
         token.annotations["srl_0"] = token.annotations["srl"][0].replace("B-", "").replace("I-", "")
 
-from saf import Vocabulary
-vocab = Vocabulary(eb_dataset, source="srl_0", lowercase=False)
 
 # ------------------- latent Disentanglement -----------------------
 # Returns a pandas.DataFrame: cols = metrics, single row

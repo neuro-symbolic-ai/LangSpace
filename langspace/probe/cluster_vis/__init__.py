@@ -15,7 +15,7 @@ from tqdm import tqdm
 from yellowbrick.features import PCA
 from yellowbrick.text import UMAPVisualizer
 
-mpl.use('TkAgg')  # !IMPORTANT
+# mpl.use('TkAgg')  # !IMPORTANT
 
 
 class ClusterVisualizationProbe(LatentSpaceProbe):
