@@ -494,17 +494,17 @@ class DisentanglementProbe(LatentSpaceProbe):
 
         for i in range(0, r.shape[1]):
             p = r[:, i]
-            p = p / np.sum(p)
+            p = p / np.sum(p) if (np.sum(p) > 1e-7) else 0.0
             h_k_p = self.entropy(p) / np.log(r.shape[0])
             disentanglement.append(1 - h_k_p)
 
         disentanglement = np.array(disentanglement)
-        weight = np.sum(r, axis=0) / np.sum(r)
+        weight = np.sum(r, axis=0) / np.sum(r) if (np.sum(r) > 1e-7) else 0.0
         # print("Disentanglement Score: {:.4f}".format(np.sum(weight * disentanglement)))
 
         for j in range(0, r.shape[0]):
             p = r[j, :]
-            p = p / np.sum(p)
+            p = p / np.sum(p) if (np.sum(p) > 1e-7) else 0.0
             h_d_p = self.entropy(p) / np.log(r.shape[1])
             completeness.append(1 - h_d_p)
 

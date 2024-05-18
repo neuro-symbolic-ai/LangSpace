@@ -4,6 +4,7 @@ transformers
 pandas
 scipy
 pot
+yellowbrick
 langvae
 saf-nlp
 saf-datasets

@@ -129,9 +129,16 @@ class ClusterVisualizationProbe(LatentSpaceProbe):
             Return:
                 save image.png
         """
+
+        if (isinstance(list(self.data[:1])[0], Sentence)):
+            data = [[sent.surface, " ".join([tok.annotations[annotation] for tok in sent.tokens])]
+                    for sent in self.data]
+        else:
+            data = self.data
+
         latent_all, label_all = [], []
-        for data_batch in tqdm([self.data[i * self.batch_size: (i + 1) * self.batch_size]
-                           for i in range(math.ceil(self.sample_size / self.batch_size))], desc="Encoding"):
+        for data_batch in tqdm([data[i * self.batch_size: (i + 1) * self.batch_size]
+                                for i in range(math.ceil(self.sample_size / self.batch_size))], desc="Encoding"):
             latent_all.append(self.encoding([d[0] for d in data_batch]))
             label_all.extend([d[1] for d in data_batch])
 
