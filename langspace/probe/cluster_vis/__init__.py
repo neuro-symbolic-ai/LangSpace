@@ -124,14 +124,14 @@ class ClusterVisualizationProbe(LatentSpaceProbe):
 
             if method == CvM.TSNE:
                 tsne = TSNEVisualizer(ax=ax, decompose_by=2, decompose="svd", classes=classes)
-                tsne.fit(latent_all.numpy(), np.array(label_all))
+                tsne.fit(latent_all.cpu().numpy(), np.array(label_all))
                 tsne.show()
                 fig.savefig(f"t_sne.png", dpi=500)
                 figs.append(tsne)
 
             if method == CvM.UMAP:
                 umap = UMAPVisualizer(ax=ax, decompose_by=2, decompose="svd", classes=classes)
-                umap.fit(latent_all.numpy(), np.array(label_all))
+                umap.fit(latent_all.cpu().numpy(), np.array(label_all))
                 umap.show()
                 fig.savefig(f"umap.png", dpi=500)
                 figs.append(umap)
@@ -139,7 +139,7 @@ class ClusterVisualizationProbe(LatentSpaceProbe):
             if method == CvM.PCA:
                 visualizer = PCA(scale=True, classes=classes)
                 # convert label_all to int list.
-                visualizer.fit_transform(latent_all.numpy(), np.array([classes.index(i) for i in label_all]))
+                visualizer.fit_transform(latent_all.cpu().numpy(), np.array([classes.index(i) for i in label_all]))
                 visualizer.show()
                 fig.savefig(f"pca.png", dpi=500)
                 figs.append(visualizer)

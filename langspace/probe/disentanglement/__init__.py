@@ -110,7 +110,7 @@ class DisentanglementProbe(LatentSpaceProbe):
         # get latent representation
         sents = data[:sample_size]
         latent = self.batched_encoding(sents, annotations=annotations, batch_size=batch_size)
-        representations = latent.numpy()
+        representations = latent.cpu().numpy()
         self.representations = representations
 
         self.dataset.get_representation_space(representations)
