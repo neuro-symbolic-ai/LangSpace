@@ -3,6 +3,7 @@
 # 3. Run qualitative evaluation: clustering
 # 3. Run qualitative evaluation: interp
 import langspace.models as models
+from saf.importers import ListImporter
 from saf_datasets import WiktionaryDefinitionCorpus, EntailmentBankDataSet
 from langvae import LangVAE
 from langspace.probe import DisentanglementProbe, TraversalProbe, InterpolationProbe, ClusterVisualizationProbe, ArithmeticProbe
@@ -12,10 +13,13 @@ from langspace.probe.cluster_vis.methods import ClusterVisualizationMethod as Cv
 from langspace.ops.arithmetic import ArithmeticOps
 import random
 from collections import Counter
-DEVICE = "cpu"
+DEVICE = "cuda"
 
 with open('explanations.txt') as file:
-    sents = file.readlines()
+    expl_srl = [line.split(" & ") for line in file.readlines()]
+    expl = [es[0].split() for es in expl_srl]
+    srl = [es[1].split() for es in expl_srl]
+    sents = ListImporter(annotations=["srl"])([list(zip(token, label)) for token, label in zip(expl, srl)]).sentences
 
 gen_factors = {
     "direction": ["ARGM-DIR"],
@@ -36,46 +40,61 @@ gen_factors = {
 }
 
 # Loading and evaluating pretrained model
-model = LangVAE.load_from_hf_hub(models.OPTIMUS_ENTAILMENTBANK, allow_pickle=True) # Loads Optimus definition model (LangVAE) from HF.
+model = LangVAE.load_from_hf_hub("neuro-symbolic-ai/eb-langvae-bert-base-cased-gpt2-l128") # Loads Optimus definition model (LangVAE) from HF.
 model.eval()
-model.to(DEVICE)
+# model.to(DEVICE)
 
 # wiktdefs = WiktionaryDefinitionCorpus.from_resource("pos+lemma+ctag+dep+dsr#sample") # Loads annotated dataset
-eb_dataset = [sent for sent in EntailmentBankDataSet.from_resource("pos+lemma+ctag+dep+srl#noproof")
-              if (sent.annotations["type"] == "answer" or sent.annotations["type"].startswith("context"))]
+eb_dataset = EntailmentBankDataSet.from_resource("pos+lemma+ctag+dep+srl#noproof")
+dataset = [
+    sent for sent in eb_dataset
+    if (sent.annotations["type"] == "answer" or sent.annotations["type"].startswith("context"))
+]
 
-for sent in eb_dataset:
+for factor in gen_factors:
+    gen_factors[factor] = ["I-" + lbl if (lbl != "O") else lbl for lbl in gen_factors[factor]]
+
+annotations = {"srl_f": eb_dataset.annotations["srl"]}
+for sent in dataset:
     for token in sent.tokens:
-        token.annotations["srl_0"] = token.annotations["srl"][0].replace("B-", "").replace("I-", "")
+        srl = token.annotations["srl"]
+        token_annot = [lbl for lbl in srl if (lbl != "O")][0] if (len(set(srl)) > 1) else srl[0]
+        token.annotations["srl_f"] = token_annot
+#
+# annotations = {"srl_f": [lbl.replace("B-", "").replace("I-", "") for lbl in eb_dataset.annotations["srl"]]}
+
 
 
 # ------------------- latent Disentanglement -----------------------
 # Returns a pandas.DataFrame: cols = metrics, single row
-dis_list = [[s.replace('\n', '').split('&')[0].strip(), s.replace('\n', '').split('&')[1].strip()] for s in sents]
-
+# dis_list = [[s.replace('\n', '').split('&')[0].strip(), s.replace('\n', '').split('&')[1].strip()] for s in sents]
+#
 metrics = [Metric.Z_DIFF, Metric.Z_MIN_VAR, Metric.MIG, Metric.INFORMATIVENESS, Metric.COMPLETENESS]
-disentang_report = DisentanglementProbe(model, eb_dataset, sample_size=20000, metrics=metrics, gen_factors=gen_factors,
-                                        annotation="srl_0").report()
+disentang_report = DisentanglementProbe(model, dataset, sample_size=10000, metrics=metrics, gen_factors=gen_factors,
+                                        annotations=annotations).report()
 
 print(disentang_report)
 disentang_report.to_csv("disentanglement.csv")
 
-exit(0)
-
 
 # ------------------- latent visualization -------------------------
-# viz_list = [(s.replace('\n', '').split('&')[0].strip(), s.replace('\n', '').split('&')[1].strip()) for s in sents]
-# sample_size, TopK = 1000, 5
-#
-# # target_role = ['ARG0 : animal', 'ARG0 : water', 'ARG0 : plant', 'ARG0 : something']
-# target_viz_list = ClusterVisualizationProbe.role_content_viz(viz_list, ['ARG0 : animal', 'ARG0 : water', 'ARG0 : plant', 'ARG0 : something'], sample_size=1000, TopK=5)
-# cluster_viz_report = ClusterVisualizationProbe(model, target_viz_list, sample_size=sample_size, methods=[CvM.TSNE]).report()
+# #viz_list = [(s.replace('\n', '').split('&')[0].strip(), s.replace('\n', '').split('&')[1].strip()) for s in sents]
+
+target_roles = {"ARG0": ["animal", "water", "plant", "something"]}
+labels = list(target_roles.keys())
+for prefix in ["B-", "I-"]:
+    for lbl in labels:
+        target_roles[prefix + lbl] = target_roles[lbl]
+
+cluster_viz_report = ClusterVisualizationProbe(model, dataset, sample_size=1000, target_roles=target_roles,
+                                               methods=[CvM.TSNE, CvM.PCA], cluster_annotation="srl_f",
+                                               annotations=annotations).report()
 
 
 # ------------------- latent traversal ---------------------------
 # Returns a pandas.DataFrame: cols = dims, rows = distance, vals = generated sentences
-trav_dataset = eb_dataset[:2]
-trav_report = TraversalProbe(model, trav_dataset, sample_size=10, dims=list(range(32))).report()
+trav_dataset = dataset[:2]
+trav_report = TraversalProbe(model, trav_dataset, sample_size=10, dims=list(range(128)), annotations=annotations).report()
 print(trav_report)
 trav_report.to_csv("traversal.csv")
 
@@ -86,8 +105,9 @@ trav_report.to_csv("traversal.csv")
 #     ("the sun is in the northern hemisphere", "food is a source of energy for animals / plants")
 # ]
 # random.shuffle(eb_dataset)
-interp_dataset = [(eb_dataset[i], eb_dataset[i+1]) for i in range(0, 50, 2)]
-interp_report = InterpolationProbe(model, interp_dataset, eval=[InterpMetric.QUALITY, InterpMetric.SMOOTHNESS]).report()
+interp_dataset = [(dataset[i], dataset[i+1]) for i in range(0, 50, 2)]
+interp_report = InterpolationProbe(model, interp_dataset, eval=[InterpMetric.QUALITY, InterpMetric.SMOOTHNESS],
+                                   annotations=annotations).report()
 print(interp_report)
 interp_report.to_csv("interp.csv")
 
@@ -97,8 +117,8 @@ interp_report.to_csv("interp.csv")
 #     ("water vapor is invisible", "the water is warm")
 # ]
 # random.shuffle(eb_dataset)
-op_dataset = [(eb_dataset[i], eb_dataset[i+1]) for i in range(0, 50, 2)]
-arith_report = ArithmeticProbe(model, op_dataset, ops=list(ArithmeticOps)).report()
+op_dataset = [(dataset[i], dataset[i+1]) for i in range(0, 50, 2)]
+arith_report = ArithmeticProbe(model, op_dataset, ops=list(ArithmeticOps), annotations=annotations).report()
 print(arith_report)
 arith_report.to_csv("arithm.csv")
 

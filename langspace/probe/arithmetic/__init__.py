@@ -1,9 +1,9 @@
-import torch.nn.functional as F
 import torch
 import pandas as pd
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 from torch import Tensor
 from pandas import DataFrame
+from saf import Sentence
 from langvae import LangVAE
 from langspace.ops.arithmetic import ArithmeticOps
 from .. import LatentSpaceProbe
@@ -13,7 +13,8 @@ class ArithmeticProbe(LatentSpaceProbe):
     """
     Class for probing the arithmetic operations in the latent space of a language VAE.
     """
-    def __init__(self, model: LangVAE, data: List[Tuple[str, str]], ops: List[ArithmeticOps]):
+    def __init__(self, model: LangVAE, data: List[Tuple[Sentence, Sentence]],
+                 ops: List[ArithmeticOps], annotations: Dict[str, List[str]] = None):
         """
         Initialize the ArithmeticProbe.
 
@@ -25,45 +26,9 @@ class ArithmeticProbe(LatentSpaceProbe):
         super(ArithmeticProbe, self).__init__(model, data, 0)
         self.data = data
         self.ops = ops
+        self.annotations = annotations
 
-    def encoding(self, data):
-        """
-        Encodes the sentences
-
-        Args:
-            data (List[str]): sentences
-
-        Returns:
-            Tensor: Latent representation
-        """
-        seed = list(data)
-        if (len(seed) < 2):
-            seed.append("")
-
-        encode_seed = self.model.decoder.tokenizer(seed, padding="max_length", truncation=True,
-                                                   max_length=self.model.decoder.max_len, return_tensors='pt')
-        encode_seed_oh = F.one_hot(encode_seed["input_ids"], num_classes=len(self.model.decoder.tokenizer.get_vocab())).to(torch.int8)
-        with torch.no_grad():
-            latent = self.model.encode_z(encode_seed_oh)
-
-        return latent
-
-    def decoding(self, prior):
-        """
-        Decodes latent representations
-
-        Args:
-            prior (Tensor): latent representations
-
-        Returns:
-            List[str]: Decoded sentences
-        """
-        generated = self.model.decoder(prior)['reconstruction']
-        sentence_list = self.model.decoder.tokenizer.batch_decode(torch.argmax(generated, dim=-1),
-                                                                  skip_special_tokens=True)
-        return sentence_list
-
-    def arithmetic(self, source, target) -> List[Tensor]:
+    def arithmetic(self, source: Tensor, target: Tensor) -> List[Tensor]:
         res = list()
         for op in self.ops:
             if op == ArithmeticOps.SUM:
@@ -91,16 +56,18 @@ class ArithmeticProbe(LatentSpaceProbe):
         report = list()
         source_list = [sp[0] for sp in self.data]
         target_list = [sp[1] for sp in self.data]
-        source = self.encoding(source_list)
-        target = self.encoding(target_list)
+        _, _, source, src_cvars_emb = self.encoding(source_list, self.annotations)
+        _, _, target, tgt_cvars_emb = self.encoding(target_list, self.annotations)
+        source = torch.cat([source] + src_cvars_emb, dim=-1) if src_cvars_emb else source
+        target = torch.cat([target] + tgt_cvars_emb, dim=-1) if tgt_cvars_emb else target
         latent_ops_list = self.arithmetic(source, target)
         sent_list = self.decoding(torch.cat(latent_ops_list))
         data_len = len(self.data)
 
         for i, op in enumerate(self.ops):
             d = {
-                "source": source_list,
-                "target": target_list,
+                "source": [s.surface for s in source_list],
+                "target": [s.surface for s in target_list],
                 "op": [op.value.lower()] * data_len,
                 "generate": sent_list[i * data_len: (i + 1) * data_len]
             }

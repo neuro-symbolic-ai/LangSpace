@@ -1,15 +1,13 @@
-from typing import Tuple, List, Iterable, Union
-from pandas import DataFrame
+from typing import Tuple, List, Dict, Iterable, Union
+from collections import Counter
 from saf import Sentence
 from langvae import LangVAE
 from .. import LatentSpaceProbe
 from .methods import ClusterVisualizationMethod as CvM
 import math
-import torch.nn.functional as F
 import torch
 from yellowbrick.text import TSNEVisualizer
 import numpy as np
-import matplotlib as mpl
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from yellowbrick.features import PCA
@@ -22,8 +20,9 @@ class ClusterVisualizationProbe(LatentSpaceProbe):
     """
     Class for visualisation (PCA, T-SNE, UMAP) of the latent space of a language VAE.
     """
-    def __init__(self, model: LangVAE, data: Iterable[Tuple[Union[str, Sentence], Union[str, int]]], sample_size: int,
-                 methods: List[CvM], batch_size: int = 20):
+    def __init__(self, model: LangVAE, data: Iterable[Sentence], sample_size: int, target_roles: Dict[str, List[str]],
+                 methods: List[CvM], cluster_annotation: str, batch_size: int = 20,
+                 annotations: Dict[str, List[str]] = None):
         """
         Initialize the ClusterVisualizationProbe.
 
@@ -40,6 +39,9 @@ class ClusterVisualizationProbe(LatentSpaceProbe):
 
         self.method = methods
         self.batch_size = batch_size
+        self.target_roles = target_roles
+        self.cluster_annot = cluster_annotation
+        self.annotations = annotations
 
     @staticmethod
     def structure_viz(viz_list, sample_size=1000, TopK=5):
@@ -82,43 +84,16 @@ class ClusterVisualizationProbe(LatentSpaceProbe):
         return target_viz_list
 
     @staticmethod
-    def role_content_viz(viz_list, target_role, sample_size=1000, TopK=5):
-        # 1. count unique role-content
-        role_content_dict = dict()
+    def role_content_viz(viz_list: Iterable[Sentence], target_roles: Dict[str, List[str]],
+                         annotation: str) -> List[Tuple[Sentence, str]]:
         target_viz_list = []
-        for pair in viz_list:
-            sents, labels = pair[0].split(' '), pair[1].split(' ')
-            for idx, tkn in enumerate(sents):
-                label = labels[idx]
-                key = label + ' : ' + tkn
-                if key not in target_role:
-                    continue
-                else:
-                    target_viz_list.append((pair[0], key))
+        for sent in viz_list:
+            for idx, tok in enumerate(sent.tokens):
+                if (tok.surface in target_roles.get(tok.annotations[annotation], [])):
+                    key = f"{tok.annotations[annotation]} : {tok.surface}"
+                    target_viz_list.append((sent, key))
 
         return target_viz_list
-
-    def encoding(self, data: List[str]):
-        """
-        Encodes the sentences
-
-        Args:
-            data (List[str]): sentences
-
-        Returns:
-            Tensor: Latent representation
-        """
-        seed = list(data)
-        if (len(seed) < 2):
-            seed.append("")
-
-        encode_seed = self.model.decoder.tokenizer(seed, padding="max_length", truncation=True,
-                                                   max_length=self.model.decoder.max_len, return_tensors='pt')
-        encode_seed_oh = F.one_hot(encode_seed["input_ids"], num_classes=len(self.model.decoder.tokenizer.get_vocab())).to(torch.int8)
-        with torch.no_grad():
-            latent = self.model.encode_z(encode_seed_oh)
-
-        return latent
 
     def report(self):
         """
@@ -129,17 +104,12 @@ class ClusterVisualizationProbe(LatentSpaceProbe):
             Return:
                 save image.png
         """
-
-        if (isinstance(list(self.data[:1])[0], Sentence)):
-            data = [[sent.surface, " ".join([tok.annotations[annotation] for tok in sent.tokens])]
-                    for sent in self.data]
-        else:
-            data = self.data
+        target_viz_list = ClusterVisualizationProbe.role_content_viz(self.data, self.target_roles, self.cluster_annot)
 
         latent_all, label_all = [], []
-        for data_batch in tqdm([data[i * self.batch_size: (i + 1) * self.batch_size]
+        for data_batch in tqdm([target_viz_list[i * self.batch_size: (i + 1) * self.batch_size]
                                 for i in range(math.ceil(self.sample_size / self.batch_size))], desc="Encoding"):
-            latent_all.append(self.encoding([d[0] for d in data_batch]))
+            latent_all.append(self.batched_encoding([d[0] for d in data_batch], self.annotations, self.batch_size))
             label_all.extend([d[1] for d in data_batch])
 
         latent_all = torch.cat(latent_all)

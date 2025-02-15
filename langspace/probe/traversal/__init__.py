@@ -1,4 +1,4 @@
-from typing import Tuple, List, Iterable, Union
+from typing import Tuple, List, Dict, Iterable, Union
 import pandas as pd
 import torch
 import torch.nn.functional as F
@@ -7,7 +7,9 @@ from pandas import DataFrame
 from tqdm import tqdm
 from joblib import Parallel, delayed, cpu_count
 from saf import Sentence
+from saf_datasets import SentenceDataSet, BasicSentenceDataSet
 from langvae import LangVAE
+from langvae.data_conversion.tokenization import TokenizedDataSet, TokenizedAnnotatedDataSet
 from .. import LatentSpaceProbe
 from langspace.ops.traversal import TraversalOps
 
@@ -16,7 +18,8 @@ class TraversalProbe(LatentSpaceProbe):
     """
     Class for probing the traversal of the latent space of a language VAE.
     """
-    def __init__(self, model: LangVAE, data: Iterable[Union[str, Sentence]], sample_size: int, dims: List[int]):
+    def __init__(self, model: LangVAE, data: Iterable[Sentence], sample_size: int, dims: List[int],
+                 annotations: Dict[str, List[str]] = None):
         """
         Initialize the TraversalProbe.
 
@@ -30,44 +33,7 @@ class TraversalProbe(LatentSpaceProbe):
         self.dims = dims
         self.model = model
         self.sample_size = sample_size
-
-    def encoding(self, data: Iterable[Union[str, Sentence]]) -> Tuple[Tensor, Tensor, Tensor]:
-        """
-        Encode the input data and return the mean, standard deviation, and latent representation.
-
-        Args:
-            data (Iterable[Union[str, Sentence]]): The input data to encode.
-
-        Returns:
-            Tuple[List[float], List[float], List[float]]: A tuple containing the mean, standard deviation, and latent representation as lists.
-        """
-        seed = list(data)
-        if (isinstance(seed[0], Sentence)):
-            seed = [sent.surface for sent in data]
-        if (len(seed) < 2):
-            seed.append("")
-
-        encode_seed = self.model.decoder.tokenizer(seed, padding="max_length", truncation=True,
-                                                   max_length=self.model.decoder.max_len, return_tensors='pt')
-        encode_seed_oh = F.one_hot(encode_seed["input_ids"],
-                                   num_classes=len(self.model.decoder.tokenizer.get_vocab())).to(torch.int8)
-        with torch.no_grad():
-            encoded = self.model.encoder(encode_seed_oh)
-
-        mu = encoded["embedding"]
-        std = torch.exp(0.5 * encoded["log_covariance"])
-        latent, eps = self.model._sample_gauss(mu, std)
-        return mu, std, latent
-
-    def decoding(self, prior: Tensor):
-        """
-        args: sent_num by latent_dim
-        return: sentence list
-        """
-        generated = self.model.decoder(prior)['reconstruction']
-        sentence_list = self.model.decoder.tokenizer.batch_decode(torch.argmax(generated, dim=-1),
-                                                                  skip_special_tokens=True)
-        return sentence_list
+        self.annotations = annotations
 
     def report(self) -> DataFrame:
         """
@@ -87,7 +53,12 @@ class TraversalProbe(LatentSpaceProbe):
         report = list()
         # encoding
         print("Encoding...")
-        mu, std, latent = self.encoding(self.data)
+        mu, std, latent, cvars_emb = self.encoding(self.data, self.annotations)
+        # cvars_emb_trav = [
+        #     c_emb[0].expand(self.sample_size, c_emb.shape[0], -1).transpose(0, 1).view(-1, c_emb.shape[-1])
+        #     for c_emb in cvars_emb
+        # ]
+        latent = torch.cat([latent] + cvars_emb, dim=-1) if cvars_emb else latent
         print("Traversing...")
         with Parallel(n_jobs=1) as ppool:
             prior_latents_dists = ppool(delayed(TraversalOps.traverse)(mu, std, latent, dim, self.sample_size)

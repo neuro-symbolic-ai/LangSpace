@@ -1,4 +1,4 @@
-from typing import List, Iterable, Union
+from typing import List, Iterable, Dict
 
 import pandas as pd
 from pandas import DataFrame
@@ -6,7 +6,6 @@ from saf import Sentence
 from langvae import LangVAE
 from langspace.metrics.disentanglement import DisentanglementMetric
 from .. import LatentSpaceProbe
-import torch.nn.functional as F
 import numpy as np
 import random
 import tensorflow as tf
@@ -14,8 +13,6 @@ from sklearn.svm import LinearSVC
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import roc_auc_score
-import torch
-from tqdm import tqdm
 
 class GenerativeDataset:
     def __init__(self):
@@ -79,36 +76,40 @@ class DisentanglementProbe(LatentSpaceProbe):
     """
     Class for probing disentanglement metrics for the latent space of a language VAE.
     """
-    def __init__(self, model: LangVAE, data: Iterable[Union[List[str], Sentence]], sample_size: int,
-                 metrics: List[DisentanglementMetric], gen_factors: dict, annotation: str, batch_size: int = 100):
+    def __init__(self, model: LangVAE, data: Iterable[Sentence], sample_size: int,
+                 metrics: List[DisentanglementMetric], gen_factors: dict,
+                 annotations: Dict[str, List[str]] = None, batch_size: int = 100):
         """
         Initialize the DisentanglementProbe.
 
         Args:
             model (LangVAE): The language model to probe.
-            data (Iterable[Union[str, Sentence]]):
-                [['animals require food for survival', 'arg0 v arg1 prp prp'], ..., ]
+            data (Iterable[Sentence]): sentences to be used for the probe.
 
             sample_size (int): The number of data points to use for probing.
             metrics (List[DisentanglementMetric]): A list of disentanglement metrics to compute.
             gen_factors (dict): The generative factors to probe with.
+            annotations(Dict[str, List[str]]): Annotation types and their respective possible values.
         """
         super(DisentanglementProbe, self).__init__(model, data, sample_size)
         self.metrics = metrics
         self.gen_factors = gen_factors
         self.sample_size = sample_size
-        self.annotation = annotation
+        self.annotations = annotations
 
         # get annotation
+        first_annotation = list(annotations.keys())[0]
         if (isinstance(list(data[:1])[0], Sentence)):
-            data = [[sent.surface, " ".join([tok.annotations[annotation] for tok in sent.tokens])]
-                    for sent in data]
+            ds = [[sent.surface, " ".join([tok.annotations[first_annotation] for tok in sent.tokens])]
+                  for sent in data]
+        else:
+            ds = data
 
-        self.dataset = SRLFactorDataset(data[:sample_size], gen_factors)
+        self.dataset = SRLFactorDataset(ds[:sample_size], gen_factors)
 
         # get latent representation
-        sents = [sent[0].strip() for sent in data[:sample_size]]
-        latent = self.encoding(sents, batch_size=batch_size)
+        sents = data[:sample_size]
+        latent = self.batched_encoding(sents, annotations=annotations, batch_size=batch_size)
         representations = latent.numpy()
         self.representations = representations
 
@@ -121,29 +122,6 @@ class DisentanglementProbe(LatentSpaceProbe):
             DisentanglementMetric.COMPLETENESS: self.disentanglement_completeness_informativeness,
             DisentanglementMetric.INFORMATIVENESS: self.disentanglement_completeness_informativeness
         }
-
-    # def encoding(self, data):
-    #     """
-    #             Encodes the sentences
-    #
-    #             Args:
-    #                 data (List[str]): sentences
-    #
-    #             Returns:
-    #                 Tensor: Latent representation
-    #             """
-    #     seed = list(data)
-    #     if (len(seed) < 2):
-    #         seed.append("")
-    #
-    #     encode_seed = self.model.decoder.tokenizer(seed, padding="max_length", truncation=True,
-    #                                                max_length=self.model.decoder.max_len, return_tensors='pt')
-    #     encode_seed_oh = F.one_hot(encode_seed["input_ids"],
-    #                                num_classes=len(self.model.decoder.tokenizer.get_vocab())).to(torch.int8)
-    #     with torch.no_grad():
-    #         latent = self.model.encode_z(encode_seed_oh)
-    #
-    #     return latent
 
     def group_sampling(self, generative_factor, value, batch_size):
         i = self.dataset.generative_factors.index(generative_factor)
@@ -264,22 +242,23 @@ class DisentanglementProbe(LatentSpaceProbe):
             for j in range(0, len(self.dataset.sample_space[i])):
                 index = index + self.dataset.sample_space[i][j]
 
-            for b in range(0, sample_number):
-                index_sample = random.sample(index, 1)[0]
-                for j in range(0, len(self.dataset.sample_space[i])):
-                    if index_sample in self.dataset.sample_space[i][j]:
-                        break
-                z1 = self.group_sampling(self.dataset.generative_factors[i], self.dataset.value_space[i][j], batch_size)
-                z2 = self.group_sampling(self.dataset.generative_factors[i], self.dataset.value_space[i][j], batch_size)
-                z_diff = np.mean(np.abs(z1 - z2), axis=0)
-                z_diff.resize((1, z_diff.shape[0]))
-                if initial:
-                    x = z_diff
-                    y = i * np.ones(shape=(1,))
-                    initial = False
-                else:
-                    x = np.concatenate([x, z_diff], axis=0)
-                    y = np.concatenate([y, i * np.ones(shape=(1,))], axis=0)
+            if (index):
+                for b in range(0, sample_number):
+                    index_sample = random.sample(index, 1)[0]
+                    for j in range(0, len(self.dataset.sample_space[i])):
+                        if index_sample in self.dataset.sample_space[i][j]:
+                            break
+                    z1 = self.group_sampling(self.dataset.generative_factors[i], self.dataset.value_space[i][j], batch_size)
+                    z2 = self.group_sampling(self.dataset.generative_factors[i], self.dataset.value_space[i][j], batch_size)
+                    z_diff = np.mean(np.abs(z1 - z2), axis=0)
+                    z_diff.resize((1, z_diff.shape[0]))
+                    if initial:
+                        x = z_diff
+                        y = i * np.ones(shape=(1,))
+                        initial = False
+                    else:
+                        x = np.concatenate([x, z_diff], axis=0)
+                        y = np.concatenate([y, i * np.ones(shape=(1,))], axis=0)
 
         y = tf.keras.utils.to_categorical(y)
 
@@ -328,39 +307,40 @@ class DisentanglementProbe(LatentSpaceProbe):
 
             # print("self.dataset.sample_space: ", self.dataset.sample_space[i])
             # print("index: ", index)
-            for b in range(0, sample_number):
+            if (index):
+                for b in range(0, sample_number):
 
-                index_sample = random.sample(index, 1)[0] # For each factor, randomly choose a sentence.
-                # print("randomly choose a sentence index: ", index_sample)
+                    index_sample = random.sample(index, 1)[0] # For each factor, randomly choose a sentence.
+                    # print("randomly choose a sentence index: ", index_sample)
 
-                for j in range(0, len(self.dataset.sample_space[i])):
-                    if index_sample in self.dataset.sample_space[i][j]:
-                        break
+                    for j in range(0, len(self.dataset.sample_space[i])):
+                        if index_sample in self.dataset.sample_space[i][j]:
+                            break
 
-                # print("find sample space index: ", j)
-                # print(self.dataset.generative_factors[i])
-                # print(self.dataset.value_space[i][j])
-                # print(batch_size)
+                    # print("find sample space index: ", j)
+                    # print(self.dataset.generative_factors[i])
+                    # print(self.dataset.value_space[i][j])
+                    # print(batch_size)
 
-                z = self.group_sampling(self.dataset.generative_factors[i], self.dataset.value_space[i][j], batch_size)
+                    z = self.group_sampling(self.dataset.generative_factors[i], self.dataset.value_space[i][j], batch_size)
 
-                # print("scale: ", scale.shape)
-                # print("z shape: ", z.shape)
-                # exit()
-                z_var = np.var(z / scale, axis=0)
-                # print("z_var shape: ", z_var.shape)
-
-                # print("z_var.shape: ", z_var.shape)
-
-                if initial:
-                    x = np.argmin(z_var) * np.ones(shape=(1,))
-                    # print("index (256) corresponding to smallest var: ", x)
+                    # print("scale: ", scale.shape)
+                    # print("z shape: ", z.shape)
                     # exit()
-                    y = i * np.ones(shape=(1,))
-                    initial = False
-                else:
-                    x = np.concatenate([x, np.argmin(z_var) * np.ones(shape=(1,))], axis=0)
-                    y = np.concatenate([y, i * np.ones(shape=(1,))], axis=0)
+                    z_var = np.var(z / scale, axis=0)
+                    # print("z_var shape: ", z_var.shape)
+
+                    # print("z_var.shape: ", z_var.shape)
+
+                    if initial:
+                        x = np.argmin(z_var) * np.ones(shape=(1,))
+                        # print("index (256) corresponding to smallest var: ", x)
+                        # exit()
+                        y = i * np.ones(shape=(1,))
+                        initial = False
+                    else:
+                        x = np.concatenate([x, np.argmin(z_var) * np.ones(shape=(1,))], axis=0)
+                        y = np.concatenate([y, i * np.ones(shape=(1,))], axis=0)
 
 
         # 10 majority vote classifiers

@@ -1,8 +1,7 @@
 import torch
-import torch.nn.functional as F
 import pandas as pd
 import gensim.downloader as api
-from typing import Tuple, List
+from typing import Tuple, List, Dict
 from pandas import DataFrame
 from nltk.corpus import stopwords
 from nltk import download
@@ -17,7 +16,8 @@ class InterpolationProbe(LatentSpaceProbe):
     """
     Class for probing the interpolation of the latent space of a language VAE.
     """
-    def __init__(self, model: LangVAE, data: List[Tuple[str, str]], eval: List[InterpolationMetric]):
+    def __init__(self, model: LangVAE, data: List[Tuple[Sentence, Sentence]],
+                 eval: List[InterpolationMetric], annotations: Dict[str, List[str]] = None):
         """
         Initialize the InterpolationProbe.
 
@@ -29,44 +29,7 @@ class InterpolationProbe(LatentSpaceProbe):
         super(InterpolationProbe, self).__init__(model, data, 0)
         self.data = data
         self.eval = eval
-
-    def encoding(self, data: List[str]):
-        """
-        Encodes the sentences
-
-        Args:
-            data (List[str]): sentences
-
-        Returns:
-            Tensor: Latent representation
-        """
-        seed = list(data)
-        if (len(seed) < 2):
-            seed.append("")
-
-        encode_seed = self.model.decoder.tokenizer(seed, padding="max_length", truncation=True,
-                                                   max_length=self.model.decoder.max_len, return_tensors='pt')
-        encode_seed_oh = F.one_hot(encode_seed["input_ids"], num_classes=len(self.model.decoder.tokenizer.get_vocab())).to(torch.int8)
-        with torch.no_grad():
-            latent = self.model.encode_z(encode_seed_oh)
-
-        return latent
-
-    def decoding(self, prior):
-        """
-        Decodes latent representations
-
-        Args:
-            prior (Tensor): latent representations
-
-        Returns:
-            List[str]: Decoded sentences
-        """
-
-        generated = self.model.decoder(prior)['reconstruction']
-        sentence_list = self.model.decoder.tokenizer.batch_decode(torch.argmax(generated, dim=-1),
-                                                                  skip_special_tokens=True)
-        return sentence_list
+        self.annotations = annotations
 
     def report(self) -> DataFrame:
         """
@@ -86,15 +49,17 @@ class InterpolationProbe(LatentSpaceProbe):
         download('stopwords')
         stop_words = stopwords.words('english')
         report = list()
-        source = self.encoding([sp[0] for sp in self.data])
-        target = self.encoding([sp[1] for sp in self.data])
+        _, _, source, src_cvars_emb = self.encoding([sp[0] for sp in self.data], self.annotations)
+        _, _, target, tgt_cvars_emb = self.encoding([sp[1] for sp in self.data], self.annotations)
+        source = torch.cat([source] + src_cvars_emb, dim=-1) if src_cvars_emb else source
+        target = torch.cat([target] + tgt_cvars_emb, dim=-1) if tgt_cvars_emb else target
         latent_path = torch.stack(InterpolationOps.linearize_interpolate(source, target))
         for i in range(len(self.data)):
             sent_list = self.decoding(latent_path[:, i, :])
             ismooth = InterpolationOps.interpolation_smoothness(sent_list, model_wmd, stop_words)
 
             # save to dataframe.
-            d = {'source': self.data[i][0], 'target': self.data[i][1], 'distance': ismooth, 'generate': "\n".join(sent_list)}
+            d = {'source': self.data[i][0].surface, 'target': self.data[i][1].surface, 'distance': ismooth, 'generate': "\n".join(sent_list)}
             report.append(d)
 
         return pd.DataFrame(report)

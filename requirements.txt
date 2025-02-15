@@ -3,6 +3,8 @@ numpy
 transformers
 pandas
 scipy
+tensorflow
+gensim
 pot
 yellowbrick
 langvae

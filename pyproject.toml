@@ -1,6 +1,6 @@
 [project]
 name = "langspace"
-version = "0.1.3"
+version = "0.2.1"
 authors = [
   { name="Danilo S. Carvalho", email="danilo.carvalho@manchester.ac.uk" },
   { name="Yingji Zhang", email="yingji.zhang@postgrad.manchester.ac.uk" }
