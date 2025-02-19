@@ -51,8 +51,8 @@ class InterpolationProbe(LatentSpaceProbe):
         report = list()
         _, _, source, src_cvars_emb = self.encoding([sp[0] for sp in self.data], self.annotations)
         _, _, target, tgt_cvars_emb = self.encoding([sp[1] for sp in self.data], self.annotations)
-        source = torch.cat([source] + src_cvars_emb, dim=-1) if src_cvars_emb else source
-        target = torch.cat([target] + tgt_cvars_emb, dim=-1) if tgt_cvars_emb else target
+        source = torch.cat([source] + src_cvars_emb, dim=-1) if (src_cvars_emb and self.model.decoder.conditional) else source
+        target = torch.cat([target] + tgt_cvars_emb, dim=-1) if (tgt_cvars_emb and self.model.decoder.conditional) else target
         latent_path = torch.stack(InterpolationOps.linearize_interpolate(source, target))
         for i in range(len(self.data)):
             sent_list = self.decoding(latent_path[:, i, :])

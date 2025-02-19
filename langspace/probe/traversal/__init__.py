@@ -54,11 +54,7 @@ class TraversalProbe(LatentSpaceProbe):
         # encoding
         print("Encoding...")
         mu, std, latent, cvars_emb = self.encoding(self.data, self.annotations)
-        # cvars_emb_trav = [
-        #     c_emb[0].expand(self.sample_size, c_emb.shape[0], -1).transpose(0, 1).view(-1, c_emb.shape[-1])
-        #     for c_emb in cvars_emb
-        # ]
-        latent = torch.cat([latent] + cvars_emb, dim=-1) if cvars_emb else latent
+        latent = torch.cat([latent] + cvars_emb, dim=-1) if (cvars_emb and self.model.decoder.conditional) else latent
         print("Traversing...")
         with Parallel(n_jobs=1) as ppool:
             prior_latents_dists = ppool(delayed(TraversalOps.traverse)(mu, std, latent, dim, self.sample_size)

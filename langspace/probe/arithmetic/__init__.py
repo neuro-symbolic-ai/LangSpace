@@ -58,8 +58,8 @@ class ArithmeticProbe(LatentSpaceProbe):
         target_list = [sp[1] for sp in self.data]
         _, _, source, src_cvars_emb = self.encoding(source_list, self.annotations)
         _, _, target, tgt_cvars_emb = self.encoding(target_list, self.annotations)
-        source = torch.cat([source] + src_cvars_emb, dim=-1) if src_cvars_emb else source
-        target = torch.cat([target] + tgt_cvars_emb, dim=-1) if tgt_cvars_emb else target
+        source = torch.cat([source] + src_cvars_emb, dim=-1) if (src_cvars_emb and self.model.decoder.conditional) else source
+        target = torch.cat([target] + tgt_cvars_emb, dim=-1) if (tgt_cvars_emb and self.model.decoder.conditional) else target
         latent_ops_list = self.arithmetic(source, target)
         sent_list = self.decoding(torch.cat(latent_ops_list))
         data_len = len(self.data)
