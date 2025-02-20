@@ -40,7 +40,7 @@ gen_factors = {
 }
 
 # Loading and evaluating pretrained model
-model = LangVAE.load_from_hf_hub("neuro-symbolic-ai/eb-langvae-bert-base-cased-gpt2-l128") # Loads Optimus definition model (LangVAE) from HF.
+model = LangVAE.load_from_hf_hub("neuro-symbolic-ai/eb-langcvae-bert-base-cased-gpt2-srl-l128") # Loads Optimus definition model (LangVAE) from HF.
 model.eval()
 # model.to(DEVICE)
 
@@ -82,13 +82,15 @@ disentang_report.to_csv("disentanglement.csv")
 
 target_roles = {"ARG0": ["animal", "water", "plant", "something"]}
 labels = list(target_roles.keys())
+label_map = dict()
 for prefix in ["B-", "I-"]:
     for lbl in labels:
         target_roles[prefix + lbl] = target_roles[lbl]
+        label_map[prefix + lbl] = lbl
 
 cluster_viz_report = ClusterVisualizationProbe(model, dataset, sample_size=1000, target_roles=target_roles,
                                                methods=[CvM.TSNE, CvM.PCA], cluster_annotation="srl_f",
-                                               annotations=annotations).report()
+                                               annotations=annotations, plot_label_map=label_map).report()
 
 
 # ------------------- latent traversal ---------------------------

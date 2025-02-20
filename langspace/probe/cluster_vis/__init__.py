@@ -22,7 +22,7 @@ class ClusterVisualizationProbe(LatentSpaceProbe):
     """
     def __init__(self, model: LangVAE, data: Iterable[Sentence], sample_size: int, target_roles: Dict[str, List[str]],
                  methods: List[CvM], cluster_annotation: str, batch_size: int = 20,
-                 annotations: Dict[str, List[str]] = None):
+                 annotations: Dict[str, List[str]] = None, plot_label_map: Dict[str, str] = None):
         """
         Initialize the ClusterVisualizationProbe.
 
@@ -42,6 +42,7 @@ class ClusterVisualizationProbe(LatentSpaceProbe):
         self.target_roles = target_roles
         self.cluster_annot = cluster_annotation
         self.annotations = annotations
+        self.plot_label_map = plot_label_map
 
     @staticmethod
     def structure_viz(viz_list, sample_size=1000, TopK=5):
@@ -85,12 +86,14 @@ class ClusterVisualizationProbe(LatentSpaceProbe):
 
     @staticmethod
     def role_content_viz(viz_list: Iterable[Sentence], target_roles: Dict[str, List[str]],
-                         annotation: str) -> List[Tuple[Sentence, str]]:
+                         annotation: str, plot_label_map: Dict[str, str]) -> List[Tuple[Sentence, str]]:
         target_viz_list = []
+        label_map = plot_label_map or dict()
         for sent in viz_list:
             for idx, tok in enumerate(sent.tokens):
                 if (tok.surface in target_roles.get(tok.annotations[annotation], [])):
-                    key = f"{tok.annotations[annotation]} : {tok.surface}"
+                    label = tok.annotations[annotation]
+                    key = f"{label_map.get(label, label)} : {tok.surface}"
                     target_viz_list.append((sent, key))
 
         return target_viz_list
@@ -104,7 +107,8 @@ class ClusterVisualizationProbe(LatentSpaceProbe):
             Return:
                 save image.png
         """
-        target_viz_list = ClusterVisualizationProbe.role_content_viz(self.data, self.target_roles, self.cluster_annot)
+        target_viz_list = ClusterVisualizationProbe.role_content_viz(self.data, self.target_roles, self.cluster_annot,
+                                                                     self.plot_label_map)
 
         latent_all, label_all = [], []
         for data_batch in tqdm([target_viz_list[i * self.batch_size: (i + 1) * self.batch_size]
