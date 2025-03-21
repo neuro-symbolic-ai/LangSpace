@@ -42,7 +42,7 @@ class SRLFactorDataset(GenerativeDataset):
         E.g., ["arg0 v arg1", ... , "arg0 arg0 v arg1 arg1 arg1"]
         """
         super().__init__()
-        dic = {}
+        dic = dict()
         self.generative_factors.extend(gen_factors.keys())
         self.value_space.extend([gen_factors[factor] for factor in self.generative_factors])
         self.sample_space.extend([[list() for value in gen_factors[factor]] for factor in self.generative_factors])
@@ -54,7 +54,7 @@ class SRLFactorDataset(GenerativeDataset):
         self.structure = list()
         index = 0
         for d in data:
-            srl_tags = [k for k in d[1].strip().split(' ') if k in dic]
+            srl_tags = [k for k in d[1] if k in dic]
             structure = [dic[srl] for srl in srl_tags]
             for factor in self.generative_factors:
                 if factor in structure:
@@ -70,6 +70,8 @@ class SRLFactorDataset(GenerativeDataset):
                     else:
                         value_index = self.value_space[role_index].index(temp_role)
                         self.sample_space[role_index][value_index].append(index)
+
+            index += 1
 
 
 class DisentanglementProbe(LatentSpaceProbe):
@@ -99,11 +101,7 @@ class DisentanglementProbe(LatentSpaceProbe):
 
         # get annotation
         first_annotation = list(annotations.keys())[0]
-        if (isinstance(list(data[:1])[0], Sentence)):
-            ds = [[sent.surface, " ".join([tok.annotations[first_annotation] for tok in sent.tokens])]
-                  for sent in data]
-        else:
-            ds = data
+        ds = [[sent.surface, [tok.annotations[first_annotation] for tok in sent.tokens]] for sent in data]
 
         self.dataset = SRLFactorDataset(ds[:sample_size], gen_factors)
 
