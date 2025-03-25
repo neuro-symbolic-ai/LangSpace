@@ -1,18 +1,23 @@
-from typing import List, Iterable, Dict
-
-import pandas as pd
-from pandas import DataFrame
-from saf import Sentence
-from langvae import LangVAE
-from langspace.metrics.disentanglement import DisentanglementMetric
-from .. import LatentSpaceProbe
-import numpy as np
+import math
 import random
+import pandas as pd
+import torch
+import torch.nn.functional as F
+import numpy as np
 import tensorflow as tf
+from typing import List, Iterable, Dict
+from copy import deepcopy
+from torch import Tensor, nn
+from pandas import DataFrame
 from sklearn.svm import LinearSVC
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import roc_auc_score
+from saf import Sentence
+from langvae import LangVAE
+from langspace.metrics.disentanglement import DisentanglementMetric
+from .. import LatentSpaceProbe
+
 
 class GenerativeDataset:
     def __init__(self):
@@ -95,7 +100,7 @@ class DisentanglementProbe(LatentSpaceProbe):
         """
         super(DisentanglementProbe, self).__init__(model, data, sample_size)
         self.metrics = metrics
-        self.gen_factors = gen_factors
+        self.gen_factors = deepcopy(gen_factors)
         self.sample_size = sample_size
         self.annotations = annotations
 
@@ -103,12 +108,12 @@ class DisentanglementProbe(LatentSpaceProbe):
         first_annotation = list(annotations.keys())[0]
         ds = [[sent.surface, [tok.annotations[first_annotation] for tok in sent.tokens]] for sent in data]
 
-        self.dataset = SRLFactorDataset(ds[:sample_size], gen_factors)
+        self.dataset = SRLFactorDataset(ds[:sample_size], self.gen_factors)
 
         # get latent representation
         sents = data[:sample_size]
         latent = self.batched_encoding(sents, annotations=annotations, batch_size=batch_size)
-        representations = latent.cpu().numpy()
+        representations = latent.cpu()
         self.representations = representations
 
         self.dataset.get_representation_space(representations)
@@ -121,7 +126,7 @@ class DisentanglementProbe(LatentSpaceProbe):
             DisentanglementMetric.INFORMATIVENESS: self.disentanglement_completeness_informativeness
         }
 
-    def group_sampling(self, generative_factor, value, batch_size):
+    def group_sampling(self, generative_factor, value, batch_size) -> Tensor:
         i = self.dataset.generative_factors.index(generative_factor)
         j = self.dataset.value_space[i].index(value)
         # print("index for generative factors: ", i)
@@ -154,18 +159,18 @@ class DisentanglementProbe(LatentSpaceProbe):
             """
             samples.append(temp_samples)
 
-        return samples, np.array(p_value)
+        return samples, torch.tensor(p_value)
 
     @ staticmethod
-    def entropy(p):
+    def entropy(p: Tensor):
         temp = p.flatten()
-        temp = temp[np.where(temp > 0)]
+        temp = temp[temp > 0]
 
-        return np.sum(- temp * np.log(temp))
+        return torch.sum(- temp * torch.log(temp))
 
     def mutual_information_estimation(self, num_bins, sample_number, normalize=False):
-        z_max = np.max(self.representations, axis=0)
-        z_min = np.min(self.representations, axis=0)
+        z_max = self.representations.max(dim=0).values
+        z_min = self.representations.min(dim=0).values
 
         # get the max and min of each dimension
 
@@ -173,18 +178,18 @@ class DisentanglementProbe(LatentSpaceProbe):
         for k in range(0, self.representations.shape[1]):
             p_z = []
             temp_z = self.representations[:, k]
-            bins = z_min[k] + np.arange(0, num_bins + 1) * (z_max[k] - z_min[k]) / num_bins
+            bins = z_min[k] + torch.arange(0, num_bins + 1) * (z_max[k] - z_min[k]) / num_bins
             for b in range(0, num_bins):
                 if b == num_bins - 1:
-                    temp = np.where((temp_z >= bins[b]) & (temp_z <= bins[b + 1]))
+                    temp = torch.where((temp_z >= bins[b]) & (temp_z <= bins[b + 1]))
                 else:
-                    temp = np.where((temp_z >= bins[b]) & (temp_z < bins[b + 1]))
+                    temp = torch.where((temp_z >= bins[b]) & (temp_z < bins[b + 1]))
 
                 # temp: the index that in this range.
                 # temp[0].shape[0]: how many sentences are in this range.
                 p_z.append(temp[0].shape[0])
-            p_z = np.array(p_z)
-            p_z = p_z / np.sum(p_z)
+            p_z = torch.tensor(p_z)
+            p_z = p_z / torch.sum(p_z)
             h_z.append(self.entropy(p_z))
 
             # how to calculate the entropy from dataset??
@@ -204,20 +209,20 @@ class DisentanglementProbe(LatentSpaceProbe):
             mi = [0 for _ in range(0, self.representations.shape[1])]
             for k in range(0, self.representations.shape[1]):
                 h_z_given_value = 0
-                bins = z_min[k] + np.arange(0, num_bins + 1) * (z_max[k] - z_min[k]) / num_bins
+                bins = z_min[k] + torch.arange(0, num_bins + 1) * (z_max[k] - z_min[k]) / num_bins
                 for j in range(0, p_value.shape[0]):
                     p_z_given_value = []
                     temp_z = samples[j][:, k]
                     for b in range(0, num_bins):
                         if b == num_bins - 1:
-                            temp = np.where((temp_z >= bins[b]) & (temp_z <= bins[b + 1]))
+                            temp = torch.where((temp_z >= bins[b]) & (temp_z <= bins[b + 1]))
                         else:
-                            temp = np.where((temp_z >= bins[b]) & (temp_z < bins[b + 1]))
+                            temp = torch.where((temp_z >= bins[b]) & (temp_z < bins[b + 1]))
                         # how many sentences in this bin
                         p_z_given_value.append(temp[0].shape[0])
 
-                    p_z_given_value = np.array(p_z_given_value)
-                    p_z_given_value = p_z_given_value / max(1, int(np.sum(p_z_given_value)))
+                    p_z_given_value = torch.tensor(p_z_given_value)
+                    p_z_given_value = p_z_given_value / max(1, int(p_z_given_value.sum().item()))
 
                     h_z_given_value += p_value[j] * self.entropy(p_z_given_value)
 
@@ -227,7 +232,7 @@ class DisentanglementProbe(LatentSpaceProbe):
                     mi[k] = (mi[k] / h_value if h_value > 0 else 0 * mi[k])
 
             mutual_information.append(mi)
-        return np.array(mutual_information)
+        return torch.tensor(mutual_information)
 
     def beta_vae_metric(self, batch_size=64, sample_number=50):
         initial = True
@@ -248,47 +253,51 @@ class DisentanglementProbe(LatentSpaceProbe):
                             break
                     z1 = self.group_sampling(self.dataset.generative_factors[i], self.dataset.value_space[i][j], batch_size)
                     z2 = self.group_sampling(self.dataset.generative_factors[i], self.dataset.value_space[i][j], batch_size)
-                    z_diff = np.mean(np.abs(z1 - z2), axis=0)
-                    z_diff.resize((1, z_diff.shape[0]))
+                    z_diff = torch.mean(torch.abs(z1 - z2), dim=0)
+                    z_diff.unsqueeze_(dim=0)
                     if initial:
                         x = z_diff
-                        y = i * np.ones(shape=(1,))
+                        y = i * torch.ones((1,), dtype=torch.int64)
                         initial = False
                     else:
-                        x = np.concatenate([x, z_diff], axis=0)
-                        y = np.concatenate([y, i * np.ones(shape=(1,))], axis=0)
+                        x = torch.cat([x, z_diff], dim=0)
+                        y = torch.cat([y, i * torch.ones((1,), dtype=torch.int64)], dim=0)
 
-        y = tf.keras.utils.to_categorical(y)
+        # y = tf.keras.utils.to_categorical(y)
+        y = F.one_hot(y)
 
         # randomly shuffle data
-        indices = np.arange(x.shape[0])
-        np.random.shuffle(indices)
+        indices = torch.randperm(x.shape[0])
         x = x[indices, :]
         y = y[indices, :]
 
         # split
         x_train, x_test = x[:int(0.8 * x.shape[0]), :], x[int(0.8 * x.shape[0]):, :]
         y_train, y_test = y[:int(0.8 * y.shape[0]), :], y[int(0.8 * y.shape[0]):, :]
-        print("[Beta-VAE]: training points: {:d}, test points: {:d}".format(x_train.shape[0], x_test.shape[0]))
+        # print("[Beta-VAE]: training points: {:d}, test points: {:d}".format(x_train.shape[0], x_test.shape[0]))
 
         # 10 simple linear classifiers
         acc = []
         for i in range(0, 10):
+            # model = nn.Sequential(
+            #     nn.Linear(x.shape[1], y.shape[1]),
+            #     nn.Softmax(dim=-1)
+            # )
             inputs = tf.keras.Input(shape=(x.shape[1],))
             outputs = tf.keras.layers.Dense(y.shape[1], activation='softmax')(inputs)
             model = tf.keras.Model(inputs=inputs, outputs=outputs)
             model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.01),
                           loss="categorical_crossentropy", metrics=['accuracy'])
-            model.fit(x_train, y_train, batch_size=64, epochs=10, validation_split=0.2, verbose=0)
-            test_scores = model.evaluate(x_test, y_test, verbose=0)
+            model.fit(x_train.numpy(), y_train.numpy(), batch_size=64, epochs=10, validation_split=0.2, verbose=0)
+            test_scores = model.evaluate(x_test.numpy(), y_test.numpy(), verbose=0)
             acc.append(test_scores[1])
-        acc = np.array(acc)
+        acc = torch.tensor(acc)
         # print("Beta-VAE metric score: mean: {:.2f}%, std: {:.2f}%".format(np.mean(acc) * 100, np.std(acc) * 100))
-        return np.mean(acc), np.std(acc)
+        return acc.mean(), acc.std()
 
     def factor_vae_metric(self, batch_size=64, sample_number=1000):
 
-        scale = np.std(self.representations, axis=0)
+        scale = self.representations.std(dim=0)
 
         initial = True
         x, y = None, None
@@ -325,42 +334,41 @@ class DisentanglementProbe(LatentSpaceProbe):
                     # print("scale: ", scale.shape)
                     # print("z shape: ", z.shape)
                     # exit()
-                    z_var = np.var(z / scale, axis=0)
+                    z_var = (z / scale).var(dim=0)
                     # print("z_var shape: ", z_var.shape)
 
                     # print("z_var.shape: ", z_var.shape)
 
                     if initial:
-                        x = np.argmin(z_var) * np.ones(shape=(1,))
+                        x = z_var.argmin() * torch.ones((1,))
                         # print("index (256) corresponding to smallest var: ", x)
                         # exit()
-                        y = i * np.ones(shape=(1,))
+                        y = i * torch.ones((1,), dtype=torch.int64)
                         initial = False
                     else:
-                        x = np.concatenate([x, np.argmin(z_var) * np.ones(shape=(1,))], axis=0)
-                        y = np.concatenate([y, i * np.ones(shape=(1,))], axis=0)
+                        x = torch.cat([x, z_var.argmin() * torch.ones((1,), dtype=torch.int64)], dim=0)
+                        y = torch.cat([y, i * torch.ones((1,), dtype=torch.int64)], dim=0)
 
 
         # 10 majority vote classifiers
         acc = []
         for i in range(0, 10):
-            indices = np.arange(x.shape[0])
-            np.random.shuffle(indices)
+            indices = torch.randperm(x.shape[0])
             x = x[indices]
             y = y[indices]
             x_train, x_test = x[:int(0.8 * x.shape[0])], x[int(0.8 * x.shape[0]):]
             y_train, y_test = y[:int(0.8 * y.shape[0])], y[int(0.8 * y.shape[0]):]
-            V = np.zeros(shape=(self.representations.shape[1], len(self.dataset.generative_factors)))
+            V = torch.zeros((self.representations.shape[1], len(self.dataset.generative_factors)))
             for j in range(0, x_train.shape[0]):
                 V[int(x_train[j]), int(y_train[j])] += 1
             temp = 0
             for j in range(0, x_test.shape[0]):
-                if np.argmax(V[int(x_test[j]), :]) == y_test[j]:
+                if V[int(x_test[j]), :].argmax() == y_test[j]:
                     temp += 1
             acc.append(temp / x_test.shape[0])
-        acc = np.array(acc)
+        acc = torch.tensor(acc)
         # print("Factor-VAE metric score: mean: {:.2f}%, std: {:.2f}%".format(np.mean(acc) * 100, np.std(acc) * 100))
-        return np.mean(acc), np.std(acc)
+        return acc.mean(), acc.std()
 
     def mutual_information_gap(self, num_bins=20, sample_number=10000):
         mi = self.mutual_information_estimation(num_bins, sample_number, normalize=True)
@@ -370,12 +378,12 @@ class DisentanglementProbe(LatentSpaceProbe):
             temp_mi.sort(reverse=True)
             mig.append(temp_mi[0] - temp_mi[1])
         # print("Mutual Information Gap: {:.4f}".format(sum(mig) / len(mig)))
-        return np.mean(mig), np.std(mig)
+        return torch.tensor(mig).mean(), torch.tensor(mig).std()
 
     def modularity_explicitness(self, num_bins=20, sample_number=10000):
         mi = self.mutual_information_estimation(num_bins, sample_number) # 7 by 256
-        mask = np.zeros(shape=mi.shape)
-        index = np.argmax(mi, axis=0) # 256
+        mask = torch.zeros(mi.shape)
+        index = mi.argmax(dim=0) # 256
 
         for i in range(0, index.shape[0]):
             mask[index[i], i] = 1
@@ -384,7 +392,7 @@ class DisentanglementProbe(LatentSpaceProbe):
         # first remove the factor with the biggest MI for each dimension.
         # calculate variance of each dimension (mu is 0) of remaining factors.
 
-        delta = np.sum(np.square(mi - temp_t), axis=0) / (np.sum(np.square(temp_t), axis=0) * (mi.shape[0] - 1))
+        delta = (mi - temp_t).square().sum(dim=0) / (temp_t.square().sum(dim=0) * (mi.shape[0] - 1))
         modularity = 1 - delta
         x_train, x_test, y_train, y_test = None, None, None, None
         # print("Modularity: {:.4f}".format(np.mean(modularity)))
@@ -397,21 +405,21 @@ class DisentanglementProbe(LatentSpaceProbe):
                 temp_train, temp_test = temp[:int(0.8 * temp.shape[0]), :], temp[int(0.8 * temp.shape[0]):, :]
                 if j == 0:
                     x_train, x_test = temp_train, temp_test
-                    y_train, y_test = j * np.ones(temp_train.shape[0]), j * np.ones(temp_test.shape[0])
+                    y_train, y_test = (j * torch.ones(temp_train.shape[0], dtype=torch.int64),
+                                       j * torch.ones(temp_test.shape[0], dtype=torch.int64))
                 else:
-                    x_train = np.concatenate([x_train, temp_train], axis=0)
-                    x_test = np.concatenate([x_test, temp_test], axis=0)
-                    y_train = np.concatenate([y_train, j * np.ones(temp_train.shape[0])], axis=0)
-                    y_test = np.concatenate([y_test, j * np.ones(temp_test.shape[0])], axis=0)
-            indices = np.arange(x_train.shape[0])
-            np.random.shuffle(indices)
+                    x_train = torch.cat([x_train, temp_train], dim=0)
+                    x_test = torch.cat([x_test, temp_test], dim=0)
+                    y_train = torch.cat([y_train, j * np.ones(temp_train.shape[0])], dim=0)
+                    y_test = torch.cat([y_test, j * np.ones(temp_test.shape[0])], dim=0)
+            indices = torch.randperm(x_train.shape[0])
             x_train = x_train[indices, :]
             y_train = y_train[indices]
 
             # suggested in code from original paper
-            if (np.sum(y_train) != 0):
+            if (y_train.sum() != 0):
                 model = LogisticRegression(C=1e10, solver='liblinear')
-                model.fit(x_train, y_train)
+                model.fit(x_train.numpy(), y_train.numpy())
                 preds = model.predict_proba(x_test)
                 roc_auc = []
                 for j in range(0, len(model.classes_)):
@@ -419,12 +427,12 @@ class DisentanglementProbe(LatentSpaceProbe):
                     y_pred = preds[:, j]
                     if (True in y_true):
                         roc_auc.append(roc_auc_score(y_true, y_pred))
-                roc_auc = np.array(roc_auc)
-                explicitness.append(np.mean(roc_auc))
+                roc_auc = torch.tensor(roc_auc)
+                explicitness.append(roc_auc.mean())
 
-        explicitness = np.array(explicitness)
+        explicitness = torch.tensor(explicitness)
         # print("Explicitness: {:.4f}".format(np.mean(explicitness)))
-        return np.mean(modularity), np.mean(explicitness)
+        return modularity.mean(), explicitness.mean()
 
     def disentanglement_completeness_informativeness(self, sample_number=10000):
         informativeness = []
@@ -437,20 +445,21 @@ class DisentanglementProbe(LatentSpaceProbe):
 
             for j in range(0, len(samples)):
                 temp = samples[j]
-                temp_train, temp_test = temp[:int(np.ceil(0.8 * temp.shape[0])), :], temp[int(np.ceil(0.8 * temp.shape[0])):, :]
+                temp_train, temp_test = (temp[:int(np.ceil(0.8 * temp.shape[0])), :],
+                                         temp[int(np.ceil(0.8 * temp.shape[0])):, :])
 
                 # num by 256
                 if j == 0:
                     x_train, x_test = temp_train, temp_test
-                    y_train, y_test = j * np.ones(temp_train.shape[0]), j * np.ones(temp_test.shape[0])
+                    y_train, y_test = (j * torch.ones(temp_train.shape[0], dtype=torch.int64),
+                                       j * torch.ones(temp_test.shape[0], dtype=torch.int64))
                 else:
-                    x_train = np.concatenate([x_train, temp_train], axis=0)
-                    x_test = np.concatenate([x_test, temp_test], axis=0)
-                    y_train = np.concatenate([y_train, j * np.ones(temp_train.shape[0])], axis=0)
-                    y_test = np.concatenate([y_test, j * np.ones(temp_test.shape[0])], axis=0)
+                    x_train = torch.cat([x_train, temp_train], dim=0)
+                    x_test = torch.cat([x_test, temp_test], dim=0)
+                    y_train = torch.cat([y_train, j * torch.ones(temp_train.shape[0], dtype=torch.int64)], dim=0)
+                    y_test = torch.cat([y_test, j * torch.ones(temp_test.shape[0], dtype=torch.int64)], dim=0)
 
-            indices = np.arange(x_train.shape[0])
-            np.random.shuffle(indices)
+            indices = torch.randperm(x_train.shape[0])
             x_train = x_train[indices, :]
             y_train = y_train[indices]
 
@@ -462,40 +471,40 @@ class DisentanglementProbe(LatentSpaceProbe):
 
             model = RandomForestClassifier(n_estimators=10)
 
-            model.fit(x_train, y_train)
-            informativeness.append(model.score(x_test, y_test))
+            model.fit(x_train.numpy(), y_train.numpy())
+            informativeness.append(model.score(x_test.numpy(), y_test.numpy()))
             r.append(model.feature_importances_)
 
             # print(model.feature_importances_.shape) 256
 
-        r = np.array(r)
+        r = torch.tensor(np.ndarray(r))
 
         for i in range(0, r.shape[1]):
             p = r[:, i]
-            p = p / np.sum(p) if (np.sum(p) > 1e-7) else np.zeros(p.shape)
-            h_k_p = self.entropy(p) / np.log(r.shape[0])
+            p = p / p.sum() if (p.sum() > 1e-7) else torch.zeros(p.shape)
+            h_k_p = self.entropy(p) / math.log(r.shape[0])
             disentanglement.append(1 - h_k_p)
 
-        disentanglement = np.array(disentanglement)
-        weight = np.sum(r, axis=0) / np.sum(r) if (np.sum(r) > 1e-7) else np.zeros(r.shape)
+        disentanglement = torch.tensor(disentanglement)
+        weight = r.sum(dim=0) / r.sum() if (r.sum() > 1e-7) else torch.zeros(r.shape)
         # print("Disentanglement Score: {:.4f}".format(np.sum(weight * disentanglement)))
 
         for j in range(0, r.shape[0]):
             p = r[j, :]
-            p = p / np.sum(p) if (np.sum(p) > 1e-7) else np.zeros(p.shape)
-            h_d_p = self.entropy(p) / np.log(r.shape[1])
+            p = p / p.sum() if (p.sum() > 1e-7) else torch.zeros(p.shape)
+            h_d_p = self.entropy(p) / math.log(r.shape[1])
             completeness.append(1 - h_d_p)
 
-        completeness = np.array(completeness)
+        completeness = torch.tensor(completeness)
         # print("Completeness Score: {:.4f}".format(np.mean(completeness)))
 
-        informativeness = np.array(informativeness)
+        informativeness = torch.tensor(informativeness)
         # print("Informativeness Score: {:.4f}".format(np.mean(informativeness)))
 
         return {
             # DisentanglementMetric.DISENTANGLEMENT: (np.sum(weight * disentanglement), 0),
-            DisentanglementMetric.COMPLETENESS: (np.mean(completeness), np.std(completeness)),
-            DisentanglementMetric.INFORMATIVENESS: (np.mean(informativeness), np.std(informativeness))
+            DisentanglementMetric.COMPLETENESS: (completeness.mean(), completeness.std()),
+            DisentanglementMetric.INFORMATIVENESS: (informativeness.mean(), informativeness.std())
         }
 
     def separated_attribute_predictability(self, sample_number=10000):
@@ -509,28 +518,28 @@ class DisentanglementProbe(LatentSpaceProbe):
                 temp_train, temp_test = temp[:int(0.8 * temp.shape[0]), :], temp[int(0.8 * temp.shape[0]):, :]
                 if j == 0:
                     x_train, x_test = temp_train, temp_test
-                    y_train, y_test = j * np.ones(temp_train.shape[0]), j * np.ones(temp_test.shape[0])
+                    y_train, y_test = (j * torch.ones(temp_train.shape[0], dtype=torch.int64),
+                                       j * torch.ones(temp_test.shape[0], dtype=torch.int64))
                 else:
-                    x_train = np.concatenate([x_train, temp_train], axis=0)
-                    x_test = np.concatenate([x_test, temp_test], axis=0)
-                    y_train = np.concatenate([y_train, j * np.ones(temp_train.shape[0])], axis=0)
-                    y_test = np.concatenate([y_test, j * np.ones(temp_test.shape[0])], axis=0)
-            indices = np.arange(x_train.shape[0])
-            np.random.shuffle(indices)
+                    x_train = torch.cat([x_train, temp_train], dim=0)
+                    x_test = torch.cat([x_test, temp_test], dim=0)
+                    y_train = torch.cat([y_train, j * torch.ones(temp_train.shape[0], dtype=torch.int64)], dim=0)
+                    y_test = torch.cat([y_test, j * torch.ones(temp_test.shape[0], dtype=torch.int64)], dim=0)
+            indices = torch.randperm(x_train.shape[0])
             x_train = x_train[indices, :]
             y_train = y_train[indices]
 
-            if (np.sum(y_train) != 0):
+            if (y_train.sum() != 0):
                 acc = []
                 for j in range(0, x_train.shape[1]):
                     temp_x_train, temp_x_test = x_train[:, j].reshape(-1, 1), x_test[:, j].reshape(-1, 1)
                     model = LinearSVC(C=0.01)
-                    model.fit(temp_x_train, y_train)
-                    acc.append(model.score(temp_x_test, y_test))
+                    model.fit(temp_x_train.numpy(), y_train.numpy())
+                    acc.append(model.score(temp_x_test.numpy(), y_test.numpy()))
                 acc.sort(reverse=True)
                 sap.append(acc[0] - acc[1])
         # print("SAP score: {:.4f}".format(np.mean(sap)))
-        return np.mean(sap)
+        return torch.tensor(sap).mean()
 
     def report(self) -> DataFrame:
         """
