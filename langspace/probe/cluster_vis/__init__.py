@@ -113,8 +113,10 @@ class ClusterVisualizationProbe(LatentSpaceProbe):
         latent_all, label_all = [], []
         for data_batch in tqdm([target_viz_list[i * self.batch_size: (i + 1) * self.batch_size]
                                 for i in range(math.ceil(self.sample_size / self.batch_size))], desc="Encoding"):
-            latent_all.append(self.batched_encoding([d[0] for d in data_batch], self.annotations, self.batch_size))
-            label_all.extend([d[1] for d in data_batch])
+            data = [d[0] for d in data_batch]
+            if (data):
+                latent_all.append(self.batched_encoding(data, self.annotations, self.batch_size))
+                label_all.extend([d[1] for d in data_batch])
 
         latent_all = torch.cat(latent_all)
         classes = list(set(label_all))
