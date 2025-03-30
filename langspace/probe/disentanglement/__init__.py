@@ -4,15 +4,16 @@ import pandas as pd
 import torch
 import torch.nn.functional as F
 import numpy as np
-import tensorflow as tf
 from typing import List, Iterable, Dict
 from copy import deepcopy
 from torch import Tensor, nn
+from torch.utils.data import DataLoader
 from pandas import DataFrame
 from sklearn.svm import LinearSVC
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import roc_auc_score
+from tqdm import tqdm
 from saf import Sentence
 from langvae import LangVAE
 from langspace.metrics.disentanglement import DisentanglementMetric
@@ -161,7 +162,11 @@ class DisentanglementProbe(LatentSpaceProbe):
 
         return samples, torch.tensor(p_value)
 
-    @ staticmethod
+    @staticmethod
+    def categorical_crossentropy_loss(y_pred, y_true):
+        return nn.NLLLoss()(torch.log(y_pred), y_true)
+
+    @staticmethod
     def entropy(p: Tensor):
         temp = p.flatten()
         temp = temp[temp > 0]
@@ -238,7 +243,7 @@ class DisentanglementProbe(LatentSpaceProbe):
         initial = True
         x, y = None, None
 
-        # sample for each pos
+        # sample for each label
         for i in range(0, len(self.dataset.generative_factors)):
             # sample observations for classification
             index = []
@@ -263,7 +268,6 @@ class DisentanglementProbe(LatentSpaceProbe):
                         x = torch.cat([x, z_diff], dim=0)
                         y = torch.cat([y, i * torch.ones((1,), dtype=torch.int64)], dim=0)
 
-        # y = tf.keras.utils.to_categorical(y)
         y = F.one_hot(y)
 
         # randomly shuffle data
@@ -275,23 +279,34 @@ class DisentanglementProbe(LatentSpaceProbe):
         x_train, x_test = x[:int(0.8 * x.shape[0]), :], x[int(0.8 * x.shape[0]):, :]
         y_train, y_test = y[:int(0.8 * y.shape[0]), :], y[int(0.8 * y.shape[0]):, :]
         # print("[Beta-VAE]: training points: {:d}, test points: {:d}".format(x_train.shape[0], x_test.shape[0]))
+        x_train_loader, x_test_loader = DataLoader(x_train, batch_size=64), DataLoader(x_test, batch_size=64)
+        y_train_loader, y_test_loader = DataLoader(y_train, batch_size=64), DataLoader(y_test, batch_size=64)
 
         # 10 simple linear classifiers
-        acc = []
-        for i in range(0, 10):
-            # model = nn.Sequential(
-            #     nn.Linear(x.shape[1], y.shape[1]),
-            #     nn.Softmax(dim=-1)
-            # )
-            inputs = tf.keras.Input(shape=(x.shape[1],))
-            outputs = tf.keras.layers.Dense(y.shape[1], activation='softmax')(inputs)
-            model = tf.keras.Model(inputs=inputs, outputs=outputs)
-            model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.01),
-                          loss="categorical_crossentropy", metrics=['accuracy'])
-            model.fit(x_train.numpy(), y_train.numpy(), batch_size=64, epochs=10, validation_split=0.2, verbose=0)
-            test_scores = model.evaluate(x_test.numpy(), y_test.numpy(), verbose=0)
-            acc.append(test_scores[1])
-        acc = torch.tensor(acc)
+        acc = torch.zeros(10)
+        for i in tqdm(range(0, 10), desc="Training z-diff classifiers"):
+            model = nn.Sequential(
+                nn.Linear(x.shape[1], y.shape[1]),
+                nn.Softmax(dim=-1)
+            )
+            optimizer = torch.optim.Adam(model.parameters(), lr=0.01)
+
+            accuracy = torch.tensor(0.0)
+            for epoch in range(10):
+                model.train()
+                for batch_x_train, batch_y_train in zip(x_train_loader, y_train_loader):
+                    optimizer.zero_grad()
+                    y_pred = model(batch_x_train)
+                    loss = self.categorical_crossentropy_loss(y_pred, batch_y_train.argmax(dim=-1))
+                    loss.backward()
+                    optimizer.step()
+
+            model.eval()
+            for batch_x_test, batch_y_test in zip(x_test_loader, y_test_loader):
+                y_pred = model(batch_x_test)
+                accuracy += (y_pred.argmax(dim=-1) == batch_y_test.argmax(dim=-1)).int().sum()
+
+            acc[i] = accuracy / y_test.shape[0]
         # print("Beta-VAE metric score: mean: {:.2f}%, std: {:.2f}%".format(np.mean(acc) * 100, np.std(acc) * 100))
         return acc.mean(), acc.std()
 
@@ -324,20 +339,8 @@ class DisentanglementProbe(LatentSpaceProbe):
                         if index_sample in self.dataset.sample_space[i][j]:
                             break
 
-                    # print("find sample space index: ", j)
-                    # print(self.dataset.generative_factors[i])
-                    # print(self.dataset.value_space[i][j])
-                    # print(batch_size)
-
                     z = self.group_sampling(self.dataset.generative_factors[i], self.dataset.value_space[i][j], batch_size)
-
-                    # print("scale: ", scale.shape)
-                    # print("z shape: ", z.shape)
-                    # exit()
                     z_var = (z / scale).var(dim=0)
-                    # print("z_var shape: ", z_var.shape)
-
-                    # print("z_var.shape: ", z_var.shape)
 
                     if initial:
                         x = z_var.argmin() * torch.ones((1,))
@@ -410,8 +413,9 @@ class DisentanglementProbe(LatentSpaceProbe):
                 else:
                     x_train = torch.cat([x_train, temp_train], dim=0)
                     x_test = torch.cat([x_test, temp_test], dim=0)
-                    y_train = torch.cat([y_train, j * np.ones(temp_train.shape[0])], dim=0)
-                    y_test = torch.cat([y_test, j * np.ones(temp_test.shape[0])], dim=0)
+                    y_train = torch.cat([y_train, j * torch.ones(temp_train.shape[0])], dim=0)
+                    y_test = torch.cat([y_test, j * torch.ones(temp_test.shape[0])], dim=0)
+
             indices = torch.randperm(x_train.shape[0])
             x_train = x_train[indices, :]
             y_train = y_train[indices]
@@ -477,7 +481,7 @@ class DisentanglementProbe(LatentSpaceProbe):
 
             # print(model.feature_importances_.shape) 256
 
-        r = torch.tensor(np.ndarray(r))
+        r = torch.tensor(np.stack(r))
 
         for i in range(0, r.shape[1]):
             p = r[:, i]
