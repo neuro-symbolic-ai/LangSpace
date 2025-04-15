@@ -14,17 +14,28 @@ from langspace.ops.interpolation import InterpolationOps
 
 class InterpolationProbe(LatentSpaceProbe):
     """
-    Class for probing the interpolation of the latent space of a language VAE.
+    A probe for evaluating interpolation in the latent space of an LM-VAE.
+
+    This class facilitates the exploration of latent space by interpolating between pairs of sentence encodings.
+
+    Attributes:
+        model (LangVAE): The language VAE model to be probed.
+        data (List[Tuple[Sentence, Sentence]]): A list of sentence pairs (source and target) for interpolation.
+        eval (List[InterpolationMetric]): A list of evaluation metrics used to assess the interpolation quality.
+        annotations (Dict[str, List[str]]): Optional dictionary of annotation types to be processed and all their
+        possible values, for conditional encoding.
     """
     def __init__(self, model: LangVAE, data: List[Tuple[Sentence, Sentence]],
                  eval: List[InterpolationMetric], annotations: Dict[str, List[str]] = None):
         """
-        Initialize the InterpolationProbe.
+        Initialize the InterpolationProbe with a specified model, sentence pairs, evaluation metrics, and optional annotations.
 
         Args:
-            model (LangVAE): The language model to probe.
-            data (List[Tuple[str, str]]): Sentence pairs to use for probing.
-            eval (List[InterpolationMetrics]): The metrics to evaluate.
+            model (LangVAE): The language VAE model to be probed.
+            data (List[Tuple[Sentence, Sentence]]): A list of sentence pairs. Each tuple represents a source and a target Sentence.
+            eval (List[InterpolationMetric]): A list of interpolation metrics to evaluate the smoothness or quality of the interpolation.
+            annotations (Dict[str, List[str]], optional): Optional dictionary of annotation types to be processed and
+            all their possible values, for conditional encoding.
         """
         super(InterpolationProbe, self).__init__(model, data, 0)
         self.data = data
@@ -33,14 +44,14 @@ class InterpolationProbe(LatentSpaceProbe):
 
     def report(self) -> DataFrame:
         """
-        Generate a report from the probe.
-        Inputs:
-            data = [[s1, s2], [s1, s2], ...]
-            E.g., [["the appalachian mountains are a kind of mountain", "animal is a kind of living thing"]]
+        Generate a detailed report of the interpolation results across the latent space.
 
         Returns:
-            DataFrame: The generated report.
-            column = source, target, distance, generated
+            DataFrame: A report containing the interpolation results. Each row corresponds to a sentence pair with:
+                     - 'source': Surface text of the source sentence.
+                     - 'target': Surface text of the target sentence.
+                     - 'distance': The computed smoothness (or distance) metric.
+                     - 'generate': A newline-separated string of the generated interpolation sentences.
         """
 
         # calculate IS.

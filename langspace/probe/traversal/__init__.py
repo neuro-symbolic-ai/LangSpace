@@ -16,18 +16,33 @@ from langspace.ops.traversal import TraversalOps
 
 class TraversalProbe(LatentSpaceProbe):
     """
-    Class for probing the traversal of the latent space of a language VAE.
+    A probe for analyzing latent space traversal in an LM-VAE.
+
+    This probe performs a systematic traversal along specified latent dimensions. It first encodes a set
+    of input sentences into latent representations, then perturbs these representations along each of
+    the desired dimensions. The perturbed latent points are subsequently decoded back into sentences,
+    allowing the user to inspect how modifications in particular latent dimensions affect the generated output.
+
+    Attributes:
+        dims (List[int]): List of latent space dimensions along which the probe will traverse.
+        model (LangVAE): The LM-VAE model to be probed.
+        sample_size (int): The number of samples generated along each dimension.
+        annotations (Dict[str, List[str]], optional): Optional dictionary of annotation types to be processed and all
+        their possible values, for conditional encoding.
     """
+
     def __init__(self, model: LangVAE, data: Iterable[Sentence], sample_size: int, dims: List[int],
                  annotations: Dict[str, List[str]] = None):
         """
-        Initialize the TraversalProbe.
+        Initialize the TraversalProbe with a specified model, dataset, and traversal configurations.
 
         Args:
-            model (LangVAE): The language model to probe.
-            data (Iterable[Union[str, Sentence]]): The data to use for probing. "plain sentence"
-            sample_size (int): The number of data points to use for probing.
-            dims (List[int]): The dimensions to traverse.
+            model (LangVAE): The language VAE model to probe.
+            data (Iterable[Sentence]): An iterable of sentences to be encoded.
+            sample_size (int): The number of traversal samples to generate for each specified dimension.
+            dims (List[int]): A list of indices representing the latent space dimensions to traverse.
+            annotations (Dict[str, List[str]], optional): Optional dictionary of annotation types to be processed and all
+            their possible values, for conditional encoding.
         """
         super(TraversalProbe, self).__init__(model, data, sample_size)
         self.dims = dims
@@ -37,18 +52,14 @@ class TraversalProbe(LatentSpaceProbe):
 
     def report(self) -> DataFrame:
         """
-        Generate a report from the probe.
-        Inputs:
-            data = [s1, s2, ...]
-            E.g., ["the appalachian mountains are a kind of mountain", "the appalachian mountains are a kind of mountain"]
-
-            sample_size = 10 number of sample for each dimension
-
-            dim = [8, 10, 1, ...] dimension to traverse
+        Generate a report detailing the latent space traversal results.
 
         Returns:
-            DataFrame: The generated report.
-            column: d = {'seeds' , 'dim', 'distance', 'generate'}
+            DataFrame: A pandas DataFrame containing the traversal report with the following columns:
+                - 'seeds': The source sentences.
+                - 'dim': The latent dimension traversed.
+                - 'distance': The perturbation magnitude used in the traversal.
+                - 'generate': The generated sentence from the traversed latent point.
         """
         report = list()
         # encoding

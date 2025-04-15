@@ -21,6 +21,19 @@ from .. import LatentSpaceProbe
 
 
 class GenerativeDataset:
+    """
+        A base dataset class for capturing the generative factors and corresponding representations
+        from a collection of sentences or samples.
+
+        Attributes:
+            generative_factors (List[Any]): A list to hold the names of generative factors.
+            value_space (List[List[Any]]): For each generative factor, its associated value range or
+                the unique set of factor values observed.
+            sample_space (List[List[List[int]]]): For each generative factor and each value in its value_space,
+                this holds the list of sentence indices (or sample indices) corresponding to that value.
+            representation_space (List[Any]): A list to store extracted latent representations of sentences,
+                organized based on the sample_space.
+        """
     def __init__(self):
         # generative factors
         self.generative_factors = []
@@ -35,6 +48,18 @@ class GenerativeDataset:
         self.representation_space = []
 
     def get_representation_space(self, representations):
+        """
+        Populate the representation_space based on the sample_space and provided latent representations.
+
+        For each generative factor group in sample_space, the method iterates over every
+        unique value and extracts the corresponding representation (row) from the given
+        representations (e.g., a 2D tensor or array). The result is stored in the representation_space,
+        preserving the structure of the sample_space.
+
+        Args:
+            representations (Tensor or np.ndarray): A 2D container of latent representations where each row
+            corresponds to a sentence or sample.
+        """
         for i in range(0, len(self.sample_space)):
             self.representation_space.append([[] for _ in range(0, len(self.sample_space[i]))])
             for j in range(0, len(self.sample_space[i])):
@@ -42,10 +67,55 @@ class GenerativeDataset:
 
 
 class SRLFactorDataset(GenerativeDataset):
+    """
+    A GenerativeDataset for organizing sentences based on Semantic Role Labeling (SRL) generative factors.
+
+    This dataset processes a collection of sentence data along with corresponding semantic role
+    annotations to extract and organize generative factors. It groups sentences by unique role
+    patterns for each generative factor and records both the unique patterns (value_space) and the
+    corresponding sentence indices (sample_space).
+
+    Args:
+        data (Iterable): A collection of sentence data where each element is a tuple.
+            The first element is the sentence, and the second element is a list of semantic role labels.
+            Example:
+                [
+                    ("The cat chased the mouse.", ["arg0", "v", "arg1"]),
+                    ("Dogs bark loudly.", ["arg0", "v"]),
+                    ...
+                ]
+        gen_factors (Dict[str, List[Any]]): A dictionary mapping generative factor names to lists of
+            expected role values. For example:
+                {"agent": ["arg0"], "patient": ["arg1"]}
+
+    Attributes:
+        generative_factors (List[str]): List of generative factor keys extracted from gen_factors.
+        value_space (List[List[Any]]): For each generative factor, contains the unique role patterns
+            encountered in the data.
+        sample_space (List[List[List[int]]]): For each generative factor and each unique role pattern, stores
+            the indices of sentences that match that pattern.
+        structure (List[Any]): A list capturing, for each sentence, the generative factor structure derived
+            from its semantic role labels.
+    """
     def __init__(self, data, gen_factors):
         """
-        role_list: list of the annotation of sentences, each annotation is a string, the role of each word is separated by a space.
-        E.g., ["arg0 v arg1", ... , "arg0 arg0 v arg1 arg1 arg1"]
+        Initialize the SRLFactorDataset by processing the provided sentence data and generative factor definitions.
+
+        The constructor performs the following tasks:
+          1. Initializes base attributes from GenerativeDataset.
+          2. Extracts generative factor keys from the provided gen_factors and initializes the value_space
+             and sample_space with lists corresponding to each factor.
+          3. Constructs a dictionary mapping each role value to its corresponding generative factor.
+          4. Iterates over each sentence in the data, filtering the semantic role labels that match any of the
+             defined factors.
+          5. For each generative factor present in a sentence, collates the corresponding role labels into a temporary list.
+          6. If this role pattern has not been recorded for that factor, it is added to value_space and the current
+             sentence index is recorded in sample_space. If it exists, the index is appended to the existing list.
+
+        Args:
+            data (List[List[str, List[str]]]): A collection of sentence examples where each example is a tuple.
+            The first element is the sentence, and the second element is a list of semantic role labels.
+            gen_factors (Dict[str, List[Any]]): A mapping of generative factor names to lists of possible role values.
         """
         super().__init__()
         dic = dict()
@@ -82,7 +152,7 @@ class SRLFactorDataset(GenerativeDataset):
 
 class DisentanglementProbe(LatentSpaceProbe):
     """
-    Class for probing disentanglement metrics for the latent space of a language VAE.
+    A probe for disentanglement metrics on the latent space of a language VAE.
     """
     def __init__(self, model: LangVAE, data: Iterable[Sentence], sample_size: int,
                  metrics: List[DisentanglementMetric], gen_factors: dict,

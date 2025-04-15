@@ -18,22 +18,45 @@ from yellowbrick.text import UMAPVisualizer
 
 class ClusterVisualizationProbe(LatentSpaceProbe):
     """
-    Class for visualisation (PCA, T-SNE, UMAP) of the latent space of a language VAE.
+    A probe for visualizing the latent space of a language VAE via clustering techniques.
+
+    This probe supports visualization methods including PCA, T-SNE, and UMAP. It processes a
+    collection of sentences, extracts their latent representations, and generates visual plots
+    highlighting clusters based on provided target roles and annotations. Generated plots are saved
+    to image files.
+
+    Attributes:
+        model (LangVAE): The LM-VAE model whose latent space is to be analyzed.
+        data (Iterable[Sentence]): An iterable of Sentence objects representing the input data.
+        sample_size (int): The number of data points to process for visualization.
+        target_roles (Dict[str, List[str]]): A mapping between annotation categories and target tokens
+            for visualization clustering.
+        method (List[ClusterVisualizationMethod]): A list of visualization methods to apply (e.g., TSNE, UMAP, PCA).
+        cluster_annot (str): The annotation name used to filter or identify clusters.
+        batch_size (int): The number of data points to encode in each batch.
+        annotations (Dict[str, List[str]], optional): Optional dictionary of annotation types to be processed and all
+        their possible values, for conditional encoding.
+        plot_label_map (Dict[str, str], optional): Optional mapping to provide custom labels for plotting.
     """
+
     def __init__(self, model: LangVAE, data: Iterable[Sentence], sample_size: int, target_roles: Dict[str, List[str]],
                  methods: List[CvM], cluster_annotation: str, batch_size: int = 20,
                  annotations: Dict[str, List[str]] = None, plot_label_map: Dict[str, str] = None):
         """
-        Initialize the ClusterVisualizationProbe.
+        Initialize the ClusterVisualizationProbe with the specified model, data, and configuration options.
 
         Args:
-            model (LangVAE): The language model to probe.
-            data (Iterable[Union[str, Sentence]]):
-                [['animals require food for survival', 'arg0 v arg1 prp prp'], ..., ]
-
-            sample_size (int): The number of data points to use for probing.
-            methods (List[ClusterVisualizationMethod]): A list of visualisation methods to display.
-            gen_factors (dict): The generative factors to probe with.
+            model (LangVAE): The language VAE whose latent space will be visualized.
+            data (Iterable[Sentence]): An iterable containing Sentence objects as the data input.
+            sample_size (int): The total number of data points to use for probing.
+            target_roles (Dict[str, List[str]]): Dictionary mapping role names to lists of target tokens
+                that define the roles for visualization.
+            methods (List[ClusterVisualizationMethod]): List of visualization methods (enumerated in CvM) to be applied.
+            cluster_annotation (str): The annotation key used to extract cluster labels from tokens.
+            batch_size (int, optional): Batch size for encoding sentences. Default is 20.
+            annotations (Dict[str, List[str]], optional): Optional dictionary of annotation types to be processed and all
+            their possible values, for conditional encoding.
+            plot_label_map (Dict[str, str], optional): Optional mapping for renaming labels in the plots.
         """
         super(ClusterVisualizationProbe, self).__init__(model, data, sample_size)
 
@@ -47,12 +70,22 @@ class ClusterVisualizationProbe(LatentSpaceProbe):
     @staticmethod
     def structure_viz(viz_list, sample_size=1000, TopK=5):
         """
-        semantic role structure visualization
-        only show the structure (remove repeated semantic role for each sentence). E.g., ARG0 ARG0 ARG0 V ARG1 ARG1 -> ARG0 V ARG1
-        arguments:
-        viz_list = [[sent, semantic role labels], [], ..., []]
-        sample_size
-        TopK
+        Generate a structured visualization list by removing consecutive duplicate semantic role labels.
+
+        This method processes an input list of (sentence, semantic role labels) pairs. For each pair,
+        it removes repeated adjacent role labels; for example, transforming "ARG0 ARG0 ARG0 V ARG1 ARG1"
+        into "ARG0 V ARG1". It then counts the occurrences of each unique label pattern and selects
+        only the top K most frequent labels. Finally, the input list is balanced to include only up to
+        (sample_size / TopK) instances for each target label.
+
+        Args:
+            viz_list (List[Tuple[Sentence, str]]): A list of tuples where each tuple contains a sentence
+                and a string of semantic role labels separated by spaces.
+            sample_size (int, optional): The maximum number of data points to consider. Default is 1000.
+            TopK (int, optional): The number of most frequent unique role structures to retain. Default is 5.
+
+        Returns:
+            A filtered and balanced list of (sentence, unique role structure) pairs.
         """
         final_viz_list = []
         for pair in viz_list:
@@ -87,6 +120,23 @@ class ClusterVisualizationProbe(LatentSpaceProbe):
     @staticmethod
     def role_content_viz(viz_list: Iterable[Sentence], target_roles: Dict[str, List[str]],
                          annotation: str, plot_label_map: Dict[str, str]) -> List[Tuple[Sentence, str]]:
+        """
+        Extract sentences and associate them with role-specific labels for content visualization.
+
+        The method iterates through each sentence and examines its tokens. If a token's surface form
+        is found in the list of target tokens (as specified by the given annotation in target_roles),
+        it constructs a label. The label is either the original annotation or a remapped label as defined
+        in plot_label_map. Each sentence with an associated label forms a tuple that is added to the resulting list.
+
+        Args:
+            viz_list (Iterable[Sentence]): An iterable of Sentence objects to be processed.
+            target_roles (Dict[str, List[str]]): Dictionary mapping annotation keys to a list of target tokens.
+            annotation (str): The key used to access the token's annotations for role filtering.
+            plot_label_map (Dict[str, str]): Optional mapping to translate or reformat the original annotation label.
+
+        Returns:
+            List[Tuple[Sentence, str]]: A list of tuples where each tuple contains a Sentence and its associated label.
+        """
         target_viz_list = []
         label_map = plot_label_map or dict()
         for sent in viz_list:
@@ -100,12 +150,15 @@ class ClusterVisualizationProbe(LatentSpaceProbe):
 
     def report(self):
         """
-        args:
-            Inputs:
-                list: [[s1, label], [s2, label], ..., [sn, label]]
-                E.g., [["the appalachian mountains are a kind of mountain", label1], ["the appalachian mountains are a kind of mountain", label2]]
-            Return:
-                save image.png
+        Generate and save cluster visualization plots based on the encoded latent representations.
+
+        For each visualization method specified (TSNE, UMAP, PCA), it creates a corresponding plot:
+             - For TSNE, a TSNEVisualizer is created, fit with the latent vectors and labels, and saved as "t_sne.png".
+             - For UMAP, a UMAPVisualizer is created, fit and saved as "umap.png".
+             - For PCA, a PCA visualizer from Yellowbrick is used, with labels converted to integer classes, and saved as "pca.png".
+
+        Returns:
+            A list containing the visualizer objects corresponding to each applied visualization method.
         """
         target_viz_list = ClusterVisualizationProbe.role_content_viz(self.data, self.target_roles, self.cluster_annot,
                                                                      self.plot_label_map)
