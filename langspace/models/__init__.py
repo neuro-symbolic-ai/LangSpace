@@ -6,7 +6,7 @@ def select_models(encoder: str = None,
                   decoder: str = None,
                   latent_dim: int = 0,
                   annotations: List[str] = None,
-                  conditional: bool = False) -> List[str]:
+                  conditional: bool = None) -> List[str]:
     """
     Selects a list of LM-VAE models available from the neuro-symbolic-ai repository, according to the specified criteria.
 
@@ -17,7 +17,9 @@ def select_models(encoder: str = None,
     :param conditional: If it is a conditional variable model
     :return: A list of available modes
     """
-    models = [model_info.id for model_info in list_models(author="neuro-symbolic-ai")]
+    models = [model_info.id.lower() for model_info in list_models(author="neuro-symbolic-ai")]
+    encoder = encoder.lower()
+    decoder = decoder.lower()
 
     filtered = [
         model_name for model_name in models
@@ -25,8 +27,8 @@ def select_models(encoder: str = None,
             (encoder is None or encoder in model_name) and
             (decoder is None or decoder in model_name) and
             (latent_dim == 0 or f"_l{latent_dim}" in model_name) and
-            (annotations is None or f"_{'-'.join(annotations)}" in model_name) and
-            (conditional is False or "langcvae" in model_name)
+            (annotations is None or f"_{'-'.join([annot.lower() for annot in annotations])}" in model_name) and
+            (conditional is None or (conditional and "langcvae" in model_name) or (not conditional and "langvae" in model_name))
         )
     ]
 
