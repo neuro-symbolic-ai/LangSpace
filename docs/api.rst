@@ -34,7 +34,6 @@ Metrics
 .. autosummary::
     ~langspace.metrics.disentanglement.DisentanglementMetric
     ~langspace.metrics.interpolation.InterpolationMetric
-    ~langspace.metrics.interpolation.InterpolationMetric
     :nosignatures:
 
 
