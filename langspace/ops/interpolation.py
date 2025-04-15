@@ -2,6 +2,7 @@ from typing import List
 from torch import Tensor
 from gensim.models.keyedvectors import KeyedVectors
 
+
 class InterpolationOps:
     @staticmethod
     def linearize_interpolate(source: Tensor, target: Tensor, size: int = 10) -> List[Tensor]:
